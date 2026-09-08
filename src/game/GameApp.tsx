@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Pencil, RotateCcw, Shield, Swords, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronLeft, Pencil, RotateCcw, Shield, Shuffle, Swords, Volume2, VolumeX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { loadGameArt, TILE_VARIANT_COUNT, tileVariantName, tileVariantSrc } from "./assets";
 import { installAudioUnlock, playFile, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
@@ -8,6 +8,7 @@ import { InnScreen } from "./InnScreen";
 import { BackpackScreen, PaperDollScreen } from "./InventoryScreens";
 import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, CURE_DISEASE, CURES, DECORATIONS, DOUBLE_STRIKE, doubleStrikeFormula, EQUIPMENT, EXP_TO_LEVEL, FIREBALL, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, MAGIC_MISSILE, PIERCING, piercingMul, PIERCING_THRUST, MAX_LEVEL, POTIONS, POTION_LOOT_WEIGHT, PROMOTE_LEVEL, PROMOTED_BASE, PROMOTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, TERRAIN, WEAPONS, WEAPON_MAX_ENH, WEB_OF_DREAMS, BAG_MAX, LOCKPICK_PRICE, POTION_CARRY_MAX, POTION_PRICE, barricadeDecor, decorationCells, placedFootprint, decorationImage, diceFormula, emberForKill, enemyLevelFor, equippedPouchId, fireballFormula, healFormula, lightningFormula, dressMap, isSummonClass, MUSIC_TRACKS, SUMMON_CLASSES, parseLayout, potionLabel, pouchIcon, rangeLabel, sheetLine, spellFormula, spellTier, startingBags, statsFor, terrainNote, tierKey, tierUses, weaponEnhCost, weaponSellValue, MULTI_SHOT, multiShotFormula, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, STAMPEDE, stampedeFormula, type SpellTier } from "./data";
 import { BattleEngine } from "./engine";
+import { MapPreviewCanvas } from "./MapPreviewCanvas";
 import { WorldMapScreen } from "./WorldMapScreen";
 import { DISPLAY_VERSION } from "./version";
 import { ALL_LOCATIONS, ALL_MISSIONS, LOCATION_SLOTS, draftToMission, latestSerialFor, locationFill, locationForMission, mapFileName, missionById, missionsForLocation, latestSavedDraft, savedScenarios, savedVersionsFor, serialLabel, slotsFor, type MapDraft, type DraftSpawn } from "./mapstore";
@@ -767,8 +768,9 @@ export function GameApp() {
         />
       )}
 
-      {screen === "mapEditor" && (
+      {screen === "mapEditor" && art && (
         <MapEditorScreen
+          art={art}
           // The editor unmounts while a playtest runs, so the map being worked on is held
           // out here and handed back on return — otherwise testing a map threw it away.
           initialDraft={editorDraft.current}
@@ -2011,17 +2013,24 @@ function terrainHint(t: TerrainId, variant?: number): string {
 }
 
 function MapEditorScreen({
+  art,
   onBack,
   onPlaytest,
   initialDraft,
   onDraftChange,
 }: {
+  art: GameArt;
   onBack: () => void;
   onPlaytest: (m: Mission, playerLevels: Record<string, number>, enemyLevels: Record<string, number>) => void;
   /** The map to reopen with — what was being edited before a playtest took the screen away. */
   initialDraft?: MapDraft | null;
   onDraftChange?: (draft: MapDraft) => void;
 }) {
+  const [showPreview, setShowPreview] = useState(false);
+  // Rebuilding the preview's BattleEngine on every keystroke (typing a title, nudging a
+  // spawn's level) would be wasted work it can't even show — debounce to the pause after a
+  // real edit instead.
+  const [previewMission, setPreviewMission] = useState<Mission | null>(null);
   const [versionStore, setVersionStore] = useState<Record<string, MapVersion[]>>(() => loadVersionStore());
   const [activeVersions, setActiveVersions] = useState<Record<string, number>>(() => loadActiveVersions());
   const [draft, setDraft] = useState<MapDraft>(() => initialDraft ?? blankDraft());
@@ -2057,6 +2066,12 @@ function MapEditorScreen({
   useEffect(() => {
     onDraftChange?.(draft);
   }, [draft, onDraftChange]);
+
+  useEffect(() => {
+    if (!showPreview) return;
+    const t = window.setTimeout(() => setPreviewMission(draftToMission(draft)), 400);
+    return () => window.clearTimeout(t);
+  }, [draft, showPreview]);
 
   const [showLocations, setShowLocations] = useState(false);
   // Play order per location, keyed by location id. Seeded from what ALL_LOCATIONS resolved
@@ -3058,6 +3073,30 @@ function MapEditorScreen({
           </div>
         )}
 
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs uppercase tracking-wide text-muted">Prévia com os gráficos do jogo</p>
+          <Button
+            size="sm"
+            variant={showPreview ? "quiet" : "ghost"}
+            onClick={() => {
+              const next = !showPreview;
+              setShowPreview(next);
+              if (next) setPreviewMission(draftToMission(draft));
+            }}
+          >
+            {showPreview ? "Ocultar prévia" : "Mostrar prévia"}
+          </Button>
+        </div>
+        {showPreview && (
+          <div className="overflow-hidden resize shrink-0 border border-border rounded-md bg-bg/40 h-[40vh] min-h-[220px] min-w-[280px]">
+            {previewMission ? (
+              <MapPreviewCanvas mission={previewMission} art={art} />
+            ) : (
+              <div className="h-full w-full grid place-items-center text-xs text-muted">Carregando prévia…</div>
+            )}
+          </div>
+        )}
+
         <div
           className="overflow-auto resize shrink-0 border border-border rounded-md p-2 bg-bg/40 h-[60vh] min-h-[320px] min-w-[280px] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-bg/60 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full"
           style={{ scrollbarWidth: "auto", scrollbarColor: "var(--color-border, #5a5a5a) transparent" }}
@@ -3238,6 +3277,21 @@ function MapEditorScreen({
                     }
                   />
                 </label>
+                {side === "enemySpawns" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pool = classOptions.filter((c) => !isSummonClass(c));
+                      const pick = pool[Math.floor(Math.random() * pool.length)] ?? s.classId;
+                      updateSpawn(side, i, { classId: pick });
+                    }}
+                    className="text-muted hover:text-fg px-1.5"
+                    aria-label="Sortear classe"
+                    title="Sortear uma classe inimiga aleatória"
+                  >
+                    <Shuffle className="size-3.5" />
+                  </button>
+                )}
                 <button type="button" onClick={() => removeSpawn(side, i)} className="text-danger px-1.5" aria-label="Remover">
                   <X className="size-3.5" />
                 </button>
@@ -3339,19 +3393,19 @@ function MapEditorScreen({
             Keyed on the serial so the same message re-renders when an action repeats. */}
         {bigNote && (
           <div
-            className={`rounded-lg border-4 px-4 py-4 ${bigNote.ok ? "border-emerald-400 bg-emerald-500/20" : "border-red-500 bg-red-500/20"}`}
+            className={`rounded-lg border-2 px-3 py-2 max-h-[30vh] overflow-y-auto ${bigNote.ok ? "border-emerald-400 bg-emerald-500/20" : "border-red-500 bg-red-500/20"}`}
           >
             <div className="flex items-start justify-between gap-3">
-              <p className={`font-display text-3xl sm:text-4xl font-bold tracking-tight leading-none ${bigNote.ok ? "text-emerald-300" : "text-red-300"}`}>
+              <p className={`font-display text-base font-bold tracking-tight leading-tight ${bigNote.ok ? "text-emerald-300" : "text-red-300"}`}>
                 {bigNote.title}
               </p>
-              <button type="button" onClick={() => setBigNote(null)} className="text-2xl leading-none px-2 opacity-70" aria-label="Fechar">
+              <button type="button" onClick={() => setBigNote(null)} className="text-lg leading-none px-1 opacity-70" aria-label="Fechar">
                 ×
               </button>
             </div>
-            <ul className="mt-2 space-y-1">
+            <ul className="mt-1 space-y-0.5">
               {bigNote.lines.map((l, i) => (
-                <li key={i} className="text-base leading-snug">
+                <li key={i} className="text-xs leading-snug">
                   {l}
                 </li>
               ))}
@@ -3361,36 +3415,35 @@ function MapEditorScreen({
                 readOnly
                 value={bigNote.dump}
                 onFocus={(e) => e.currentTarget.select()}
-                className="mt-3 w-full h-40 bg-bg border border-border rounded-md p-2 text-xs font-mono"
+                className="mt-2 w-full h-20 bg-bg border border-border rounded-md p-2 text-xs font-mono"
               />
             )}
           </div>
         )}
         {note && (
-          <p key={note.n} className="text-lg leading-snug font-medium text-accent bg-accent/15 border-2 border-accent/60 rounded-md px-3 py-3">
+          <p key={note.n} className="text-sm leading-snug font-medium text-accent bg-accent/15 border border-accent/60 rounded-md px-2 py-1.5">
             {note.text}
           </p>
         )}
-        <Button
-          size="lg"
-          className="w-full"
-          onClick={() => {
-            const playerLevels = Object.fromEntries(draft.playerSpawns.map((s) => [s.name, s.level]));
-            // Neutrals level off the same table as enemies — one of them may well end up
-            // fighting as one before the mission is over.
-            const enemyLevels = Object.fromEntries(
-              [...draft.enemySpawns, ...(draft.neutralSpawns ?? [])].map((s) => [s.name, s.level]),
-            );
-            setNote("Testando — Encerrar teste nas Opções traz o mapa de volta como está.");
-            onPlaytest(draftToMission(draft), playerLevels, enemyLevels);
-          }}
-        >
-          Testar
-        </Button>
-        <Button size="lg" className="w-full" onClick={() => void saveScenarios()}>
-          SALVAR CENÁRIOS
-        </Button>
         <div className="flex gap-2">
+          <Button
+            className="flex-1"
+            onClick={() => {
+              const playerLevels = Object.fromEntries(draft.playerSpawns.map((s) => [s.name, s.level]));
+              // Neutrals level off the same table as enemies — one of them may well end up
+              // fighting as one before the mission is over.
+              const enemyLevels = Object.fromEntries(
+                [...draft.enemySpawns, ...(draft.neutralSpawns ?? [])].map((s) => [s.name, s.level]),
+              );
+              setNote("Testando — Encerrar teste nas Opções traz o mapa de volta como está.");
+              onPlaytest(draftToMission(draft), playerLevels, enemyLevels);
+            }}
+          >
+            Testar
+          </Button>
+          <Button className="flex-1" onClick={() => void saveScenarios()}>
+            Salvar cenários
+          </Button>
           <Button variant="ghost" className="flex-1" onClick={() => void doSave()}>
             Salvar mapa
           </Button>
