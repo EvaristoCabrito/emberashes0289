@@ -129,6 +129,7 @@ export async function loadGameArt(): Promise<GameArt> {
     "ancient-golem": { n: 8, bust: "" },
     "morvenian-wolf": { n: 6, bust: "" },
     birolho: { n: 4, bust: "" },
+    butcher: { n: 4, bust: "" },
   };
   await Promise.all(
     (Object.keys(ATTACK_FRAMES) as SpriteId[]).map(async (id) => {
