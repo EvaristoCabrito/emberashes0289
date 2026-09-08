@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower, cultistSpellUses, brigandSpellUses, birolhoSpellUses } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, equipmentIcon, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponIcon, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower, cultistSpellUses, brigandSpellUses, birolhoSpellUses } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -561,6 +561,9 @@ export class BattleEngine {
    * a long battle doesn't grow it without bound; read via getHud() for the in-battle log
    * view. */
   log: string[] = [];
+  /** See HudSnapshot.chestLoot — set the instant a chest opens, cleared only by
+   * acknowledgeChestLoot() (the player's "Ok" on the popup), not by anything time-based. */
+  private chestLoot: { unitName: string; ember: number; items: { name: string; icon: string }[] } | null = null;
   tip: string | null;
   private lastTipSeen: string | null = null;
   private tipSetAt = 0;
@@ -778,7 +781,13 @@ export class BattleEngine {
           .map((u) => ({ id: u.id, name: u.name, side: u.side, acted: u.moved, active: u.id === active?.id }));
       })(),
       log: this.log,
+      chestLoot: this.chestLoot,
     };
+  }
+
+  /** The player's "Ok" on the chest loot popup — see HudSnapshot.chestLoot. */
+  acknowledgeChestLoot(): void {
+    this.chestLoot = null;
   }
 
   battlePlayerHp(): Record<string, number> {
@@ -3533,7 +3542,7 @@ export class BattleEngine {
       kind: "impact",
       frame: 0,
     });
-    const found: string[] = [];
+    const found: { name: string; icon: string }[] = [];
     if (wasChest) {
       // Every chest gives Ember, a guaranteed potion (weighted so the weak tier is the
       // common case, rarer as potency climbs), and — a separate, independent roll — a
@@ -3545,20 +3554,24 @@ export class BattleEngine {
       const gain = (better ? CHEST_LOOT.betterEmberBase : CHEST_LOOT.emberBase) + Math.floor(this.rng() * (better ? CHEST_LOOT.betterEmberDice : CHEST_LOOT.emberDice));
       this.lootEmber += gain;
       const potionKind = weightedPotionPick(this.rng);
-      if (this.givePotion(u, potionKind)) found.push(POTIONS[potionKind].name);
+      if (this.givePotion(u, potionKind)) {
+        found.push({ name: POTIONS[potionKind].name, icon: `/game/icons/potion-${potionKind}.png?v=ds2` });
+      }
       if (this.rng() < (better ? CHEST_LOOT.betterGearChance : CHEST_LOOT.gearChance)) {
         const drop = weightedLootPick(this.rng, missionGearLevel(this.mission.index), this.ownedWeapons);
         if (drop.kind === "weapon") {
           this.ownedWeapons.add(drop.id);
           this.lootWeapons.push(drop.id);
-          found.push(WEAPONS[drop.id]!.name);
+          found.push({ name: WEAPONS[drop.id]!.name, icon: weaponIcon(drop.id) });
         } else {
           this.lootEquipment.push(drop.id);
-          found.push(EQUIPMENT[drop.id]!.name);
+          found.push({ name: EQUIPMENT[drop.id]!.name, icon: equipmentIcon(drop.id) });
         }
       }
-      this.tip = `${u.name} arrombou o baú · +${gain} Ember · achou ${found.join(", ")}.`;
+      const foundNames = found.map((f) => f.name).join(", ");
+      this.tip = `${u.name} arrombou o baú · +${gain} Ember · achou ${foundNames}.`;
       this.pushLog(this.tip);
+      this.chestLoot = { unitName: u.name, ember: gain, items: found };
     } else {
       this.tip = `${u.name} arrombou a porta.`;
       this.pushLog(this.tip);

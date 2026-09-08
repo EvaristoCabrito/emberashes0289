@@ -127,6 +127,7 @@ export function BattleCanvas({
         hud.spellReady,
         hud.turnQueue.find((q) => q.active)?.id,
         hud.turnQueue.map((q) => (q.acted ? "1" : "0")).join(""),
+        hud.chestLoot ? `${hud.chestLoot.unitName}:${hud.chestLoot.ember}:${hud.chestLoot.items.map((i) => i.name).join(",")}` : null,
       ].join("|");
       if (k !== hudKey.current) {
         hudKey.current = k;

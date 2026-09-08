@@ -532,6 +532,10 @@ export interface HudSnapshot {
   turnQueue: { id: string; name: string; side: Side; acted: boolean; active: boolean }[];
   /** Rolling combat log — attacks, spells, heals, kills, loot — newest last. */
   log: string[];
+  /** Set the instant a chest is opened, cleared only when the player dismisses the popup
+   * (see acknowledgeChestLoot) — not a transient "just happened" flag like tip, so it
+   * survives sitting on screen until the player actually reads it. */
+  chestLoot: { unitName: string; ember: number; items: { name: string; icon: string }[] } | null;
 }
 
 export interface WalkDirs {

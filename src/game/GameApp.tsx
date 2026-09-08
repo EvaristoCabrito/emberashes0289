@@ -58,6 +58,7 @@ function hudBlank(): HudSnapshot {
     spellKind: null,
     turnQueue: [],
     log: [],
+    chestLoot: null,
   };
 }
 
@@ -4046,6 +4047,30 @@ function BattleScreen({
                   Continuar explorando
                 </Button>
               </div>
+            </div>
+          </div>
+        )}
+        {hud.chestLoot && (
+          <div className="absolute inset-0 z-50 bg-bg/85 flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-surface border border-accent rounded-xl p-5">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted">Baú aberto</p>
+              <h2 className="font-display text-2xl leading-none mt-1 mb-3">{hud.chestLoot.unitName} encontrou</h2>
+              <ul className="flex flex-col gap-1.5 mb-4">
+                <li className="text-sm flex items-center gap-1.5">
+                  <span className="text-accent font-bold tabular-nums">+{hud.chestLoot.ember}</span>
+                  <span>Ember</span>
+                </li>
+                {hud.chestLoot.items.map((item, i) => (
+                  <li key={i} className="text-sm flex items-center gap-2">
+                    <img src={item.icon} alt="" className="size-8 rounded-sm object-cover bg-bg shrink-0" />
+                    <span>{item.name}</span>
+                  </li>
+                ))}
+                {hud.chestLoot.items.length === 0 && <li className="text-sm text-muted">Nada além do Ember.</li>}
+              </ul>
+              <Button className="w-full" onClick={() => engine.acknowledgeChestLoot()}>
+                Ok
+              </Button>
             </div>
           </div>
         )}
