@@ -3037,11 +3037,34 @@ export function scatterTactics(m: Mission): Mission {
   // thing the scatter places, so the count is allowed to start at two and then stop
   // climbing rather than growing with every extra hex of map.
   const wantWalls = Math.min(3, Math.max(1, Math.round(2 * density)));
-  walls.sort((a, b) => b.score - a.score);
+  // Picking straight off the static score sort put every wall in practically the same spot:
+  // the score is dominated by "between the spawns and horizontally centered," so the 2nd and
+  // 3rd best candidates were almost always just the next cell over from the 1st, barely
+  // clearing the < 3 spacing check — several barricades bunched into one corner instead of
+  // spread across the board. This picks the best wall each round same as before, but adds a
+  // bonus for distance from every wall already placed, so the 2nd and 3rd picks are actively
+  // pulled away from the 1st rather than merely tolerated next to it.
+  const wallCenters: { x: number; y: number }[] = [];
+  const remaining = [...walls];
   let placed = 0;
-  for (const wall of walls) {
-    if (placed >= wantWalls) break;
-    if (wall.cells.some((c) => taken.some((q) => oddrDist(c.x, c.y, q.x, q.y) < 3))) continue;
+  while (placed < wantWalls && remaining.length) {
+    let bestIdx = -1;
+    let bestScore = -Infinity;
+    for (let idx = 0; idx < remaining.length; idx++) {
+      const wall = remaining[idx]!;
+      if (wall.cells.some((c) => taken.some((q) => oddrDist(c.x, c.y, q.x, q.y) < 3))) continue;
+      const mx = Math.round(wall.cells.reduce((s, c) => s + c.x, 0) / 3);
+      const my = Math.round(wall.cells.reduce((s, c) => s + c.y, 0) / 3);
+      const spread = wallCenters.length ? Math.min(...wallCenters.map((p) => oddrDist(mx, my, p.x, p.y))) : 0;
+      const effScore = wall.score + spread * 2.2;
+      if (effScore > bestScore) {
+        bestScore = effScore;
+        bestIdx = idx;
+      }
+    }
+    if (bestIdx < 0) break;
+    const wall = remaining[bestIdx]!;
+    remaining.splice(bestIdx, 1);
     const prev = wall.cells.map((c) => tiles[c.y * m.cols + c.x]!);
     for (const c of wall.cells) tiles[c.y * m.cols + c.x] = "barricade";
     if (!canWalk(tiles)) {
@@ -3051,6 +3074,10 @@ export function scatterTactics(m: Mission): Mission {
       continue;
     }
     taken.push(...wall.cells);
+    wallCenters.push({
+      x: Math.round(wall.cells.reduce((s, c) => s + c.x, 0) / 3),
+      y: Math.round(wall.cells.reduce((s, c) => s + c.y, 0) / 3),
+    });
     placed += 1;
   }
   const pick = (n: number, kind: TerrainId) => {
