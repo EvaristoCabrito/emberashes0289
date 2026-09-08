@@ -3653,6 +3653,17 @@ export class BattleEngine {
   private runAiFor(next: Unit): void {
     this.smashBarricades(next);
     const reach = computeReachable(this.effectiveUnitForReach(next), this.tiles, this.cols, this.rows, this.units);
+    // Every move this function queues has to be reconstructed off this unpruned pass, not
+    // `reach` above — same reasoning as commitMove's walkReach: `reach` deletes any cell along
+    // the way that isn't itself a legal place to stop (an ally standing there, or — the one
+    // that actually bites here — a big multi-hex footprint that can't fit stopped on that cell
+    // even though it can walk through it), leaving a dangling parent reference that silently
+    // truncates reconstructPath to a single point short of the real destination. A size-1
+    // walker rarely has any such cell on its route so this went unnoticed; a size-4 footprint
+    // (Golem, Birolho, Horror, Asherah, Troll) has one on almost every route, which is why
+    // only they ever looked "stuck" — the AI had already picked a real, reachable destination,
+    // it just never got a real path to it.
+    const walkReach = computeReachable(this.effectiveUnitForReach(next), this.tiles, this.cols, this.rows, this.units, false);
     const players = this.units.filter((u) => u.side === "player" && u.alive);
 
     // Cultist ("Feiticeiro") is the one enemy mage — see cultistSpellUses. Lightning outranks
@@ -3673,7 +3684,7 @@ export class BattleEngine {
       }
       if (bestSpell) {
         if (bestSpell.from.x !== next.x || bestSpell.from.y !== next.y) {
-          this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestSpell.from) });
+          this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, bestSpell.from) });
         }
         this.spendTier(next, spellKind);
         const tiles = [{ x: bestSpell.foe.x, y: bestSpell.foe.y }];
@@ -3730,7 +3741,7 @@ export class BattleEngine {
         }
         if (bestBolt) {
           if (bestBolt.from.x !== next.x || bestBolt.from.y !== next.y) {
-            this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestBolt.from) });
+            this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, bestBolt.from) });
           }
           this.spendTier(next, "lightning");
           this.queue.push({
@@ -3772,7 +3783,7 @@ export class BattleEngine {
         }
         if (bestVenom) {
           if (bestVenom.from.x !== next.x || bestVenom.from.y !== next.y) {
-            this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestVenom.from) });
+            this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, bestVenom.from) });
           }
           this.spendTier(next, "causticVenom");
           const tiles = hexAreaTiles(bestVenom.at, CAUSTIC_VENOM.size, this.cols, this.rows);
@@ -3816,7 +3827,7 @@ export class BattleEngine {
         }
         if (bestBolt) {
           if (bestBolt.from.x !== next.x || bestBolt.from.y !== next.y) {
-            this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestBolt.from) });
+            this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, bestBolt.from) });
           }
           this.spendTier(next, "magicMissile");
           this.queue.push({
@@ -3862,7 +3873,7 @@ export class BattleEngine {
       }
       if (bestSpell) {
         if (bestSpell.from.x !== next.x || bestSpell.from.y !== next.y) {
-          this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestSpell.from) });
+          this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, bestSpell.from) });
         }
         this.spendTier(next, spellKind);
         if (spellKind === "longShot") {
@@ -3903,7 +3914,7 @@ export class BattleEngine {
     }
     if (best) {
       if (best.from.x !== next.x || best.from.y !== next.y) {
-        this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, best.from) });
+        this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, best.from) });
       }
       this.queue.push({ type: "combat", att: next.id, def: best.foe.id });
       this.queue.push({ type: "delay", dur: 0.12 });
@@ -3935,7 +3946,7 @@ export class BattleEngine {
       }
     }
     if (closest && (closest.x !== next.x || closest.y !== next.y)) {
-      this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, closest) });
+      this.queue.push({ type: "move", id: next.id, path: reconstructPath(walkReach, closest) });
     }
     next.moved = true;
     this.queue.push({ type: "delay", dur: 0.08 });
