@@ -290,6 +290,9 @@ export interface Unit {
   drawX: number;
   drawY: number;
   flash: number;
+  /** 1 right when a unit levels up, decaying to 0 over a couple seconds — drives the golden
+   * glow drawn around the sprite in render() (see levelUpUnit/spawnLevelUp). */
+  levelGlow: number;
   fade: number;
   bob: number;
   level: number;

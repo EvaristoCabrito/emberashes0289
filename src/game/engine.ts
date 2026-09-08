@@ -87,7 +87,7 @@ const ZOOM_RADII = [22, 34, 50, 72];
 interface LevelUpSpark {
   live: boolean;
   unitId: string;
-  kind: "ring" | "star";
+  kind: "ring" | "star" | "label";
   /** Offset from the unit's hex center, in pixels at the burst's own tile scale — rescaled by
    * the live cell size at draw time so it still reads right after a zoom change. */
   dx: number;
@@ -101,6 +101,7 @@ interface LevelUpSpark {
   rot: number;
   vrot: number;
   refCell: number;
+  text?: string;
 }
 
 const LEVEL_UP_FX_CAP = 44;
@@ -406,6 +407,7 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
     drawX: spawn.x,
     drawY: spawn.y,
     flash: 0,
+    levelGlow: 0,
     fade: 1,
     bob: 0,
     level,
@@ -861,6 +863,7 @@ export class BattleEngine {
     if (this.trauma > 0) this.trauma = Math.max(0, this.trauma - cap * 2.2);
     for (const u of this.units) {
       if (u.flash > 0) u.flash = Math.max(0, u.flash - cap * 4);
+      if (u.levelGlow > 0) u.levelGlow = Math.max(0, u.levelGlow - cap * 0.42);
       if (!u.alive && u.fade > 0) u.fade = Math.max(0, u.fade - cap * 2.4);
       if (u.alive) {
         const haste =
@@ -1515,7 +1518,8 @@ export class BattleEngine {
       if (gain > 0) u.spells[key] += gain;
     }
     this.tip = `${u.name} subiu para o nível ${to}!`;
-    this.emitLevelUpFx(u);
+    this.pushLog(`${u.name} subiu para o nível ${to}!`);
+    this.emitLevelUpFx(u, to);
     sfxPlay.levelUp();
   }
 
@@ -1778,10 +1782,13 @@ export class BattleEngine {
     slot.frame = init.frame;
   }
 
-  /** Golden burst played once when a unit levels up: one expanding ring plus a scatter of
-   * small stars, all anchored to the unit's hex and drifting in real pixel space (see
-   * LevelUpSpark) rather than the grid-snapped Particle system above. */
-  private emitLevelUpFx(u: Unit): void {
+  /** Golden burst played once when a unit levels up: an expanding ring, a scatter of small
+   * stars, and a big glowing "Nível X!" label over the head, all anchored to the unit's hex
+   * and drifting in real pixel space (see LevelUpSpark) rather than the grid-snapped Particle
+   * system above. Also arms the unit's own sustained levelGlow (see tick/render) so the
+   * character itself, not just the burst around it, reads as glowing for a couple seconds. */
+  private emitLevelUpFx(u: Unit, level: number): void {
+    u.levelGlow = 1;
     if (this.reducedMotion) return;
     const cell = this.layout.tile;
     const claim = (): LevelUpSpark | undefined => {
@@ -1840,6 +1847,22 @@ export class BattleEngine {
         refCell: cell,
       });
     }
+    spawn({
+      unitId: u.id,
+      kind: "label",
+      text: `NÍVEL ${level}!`,
+      dx: 0,
+      dy: -cell * 1.35,
+      vx: 0,
+      vy: -cell * 0.18,
+      life: 0,
+      max: 2.2,
+      size: cell * 0.4,
+      hue: 46,
+      rot: 0,
+      vrot: 0,
+      refCell: cell,
+    });
   }
 
   /** One glowing bolt per target, hex-to-hex — see MissileFx. */
@@ -3048,6 +3071,7 @@ export class BattleEngine {
       drawX: cell.x,
       drawY: cell.y,
       flash: 0,
+      levelGlow: 0,
       fade: 1,
       bob: 0,
       level: unit.level,
@@ -4965,13 +4989,34 @@ export class BattleEngine {
       ctx.translate(px + sway, py + footY + bob);
       if (u.sprite === "kael") ctx.scale(u.facing, 1);
       else ctx.scale(u.facing * (1 - breath * 0.22), 1 + breath);
+      if (u.levelGlow > 0) {
+        const pulse = 0.75 + Math.sin(this.time * 7) * 0.25;
+        const bg = ctx.createRadialGradient(0, -h * 0.5, 0, 0, -h * 0.5, w * 1.15);
+        bg.addColorStop(0, `rgba(255,214,120,${0.5 * u.levelGlow * pulse})`);
+        bg.addColorStop(1, "rgba(255,214,120,0)");
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.arc(0, -h * 0.5, w * 1.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowColor = `rgba(255,208,110,${0.95 * u.levelGlow})`;
+        ctx.shadowBlur = w * 0.4 * u.levelGlow * pulse;
+      }
       if (u.flash > 0) ctx.filter = `brightness(${1.8 + u.flash})`;
       if (img) ctx.drawImage(img, -w / 2, -h, w, h);
       else {
         ctx.fillStyle = u.side === "player" ? "#8a97a1" : u.side === "neutral" ? "#5f8a58" : "#a35a4a";
         ctx.fillRect(-w / 2, -h, w, h);
       }
+      // A second glow pass on top of the sprite (shadowBlur alone, no offset, mimics an outer
+      // rim glow following the art's own alpha edges) so the effect reads as coming off the
+      // character rather than just floating behind it.
+      if (u.levelGlow > 0 && img) {
+        const pulse = 0.75 + Math.sin(this.time * 7) * 0.25;
+        ctx.shadowBlur = w * 0.55 * u.levelGlow * pulse;
+        ctx.drawImage(img, -w / 2, -h, w, h);
+      }
       ctx.filter = "none";
+      ctx.shadowBlur = 0;
       ctx.restore();
 
       if (u.alive) {
@@ -5078,6 +5123,29 @@ export class BattleEngine {
             ctx.arc(x, y, s.refCell * 0.5, 0, Math.PI * 2);
             ctx.fill();
           }
+          continue;
+        }
+        if (s.kind === "label") {
+          const labelFade = k < 0.12 ? k / 0.12 : k > 0.75 ? Math.max(0, 1 - (k - 0.75) / 0.25) : 1;
+          const pop = k < 0.12 ? 1.35 - 0.35 * (k / 0.12) : 1;
+          ctx.save();
+          ctx.globalAlpha = labelFade;
+          ctx.translate(x, y);
+          ctx.scale(pop, pop);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = `900 ${Math.round(s.size)}px Figtree, sans-serif`;
+          ctx.shadowColor = `hsla(${s.hue}, 100%, 65%, 0.95)`;
+          ctx.shadowBlur = s.size * 0.9;
+          ctx.lineJoin = "round";
+          ctx.lineWidth = Math.max(4, s.size * 0.16);
+          ctx.strokeStyle = "rgba(24,16,4,0.9)";
+          ctx.strokeText(s.text ?? "", 0, 0);
+          ctx.fillStyle = `hsl(${s.hue}, 100%, 74%)`;
+          ctx.fillText(s.text ?? "", 0, 0);
+          ctx.shadowBlur = s.size * 1.6;
+          ctx.fillText(s.text ?? "", 0, 0);
+          ctx.restore();
           continue;
         }
         const fade = k < 0.15 ? k / 0.15 : k > 0.7 ? Math.max(0, 1 - (k - 0.7) / 0.3) : 1;
