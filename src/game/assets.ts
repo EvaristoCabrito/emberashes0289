@@ -35,7 +35,7 @@ export function tileVariantSrc(id: TerrainId, variant: number): string {
   return `/game/tiles/${tileVariantName(id, variant)}.png?v=39`;
 }
 const TILES = Object.keys(TILE_VARIANT_COUNT) as TerrainId[];
-const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "familiar", "swamp-blue-calf", "ancient-golem"];
+const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "morvenian-wolf", "butcher", "birolho", "familiar", "swamp-blue-calf", "ancient-golem"];
 
 const LOAD_POOL = 8;
 let loadActive = 0;
@@ -127,6 +127,8 @@ export async function loadGameArt(): Promise<GameArt> {
     aldric: { n: 4, bust: "" },
     familiar: { n: 8, bust: "?v=6" },
     "ancient-golem": { n: 8, bust: "" },
+    "morvenian-wolf": { n: 6, bust: "" },
+    birolho: { n: 4, bust: "" },
   };
   await Promise.all(
     (Object.keys(ATTACK_FRAMES) as SpriteId[]).map(async (id) => {

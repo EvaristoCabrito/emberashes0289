@@ -27,6 +27,12 @@ export const TERRAIN: Record<TerrainId, TerrainDef> = {
 // closest to the player, where the feet render) rather than spread out to one side. New
 // creature sizes should get their own FOOTPRINT_TYPE_N here instead of a one-off shape.
 
+/** Tipo 2 — a plain side-by-side pair, no hex behind (e.g. o Lobo Morveniano). */
+export const FOOTPRINT_TYPE_2 = [
+  { dx: 0, dy: 0 },
+  { dx: 1, dy: 0 },
+];
+
 /** Tipo 3 — a normal side-by-side pair plus one hex behind, on the creature's back (e.g. o Cão de guerra). */
 const FOOTPRINT_TYPE_3 = [
   { dx: 0, dy: 0 },
@@ -96,6 +102,27 @@ export const DECORATIONS: Record<string, DecorationDef> = {
   "fallen-log": { id: "fallen-log", name: "Tronco caído", footprint: DECO_PAIR },
   "small-house": { id: "small-house", name: "Casa pequena", footprint: DECO_ONE },
   "stone-hut": { id: "stone-hut", name: "Cabana de pedra", footprint: DECO_ONE },
+  "rocky-outcrop": { id: "rocky-outcrop", name: "Afloramento Rochoso", footprint: DECO_PAIR, tile: "column" },
+  "boulder-pile": { id: "boulder-pile", name: "Pilha de Pedras", footprint: DECO_PAIR, tile: "column" },
+  "twin-spires": { id: "twin-spires", name: "Torres Gêmeas de Pedra", footprint: DECO_PAIR, tile: "column" },
+  "large-boulder": { id: "large-boulder", name: "Pedregulho Grande", footprint: DECO_ONE, tile: "column" },
+  "burning-house": { id: "burning-house", name: "Casa em Chamas", footprint: DECO_ONE, tile: "highruin" },
+  "burnt-house-ruins": { id: "burnt-house-ruins", name: "Ruínas Queimadas", footprint: DECO_ONE, tile: "highruin" },
+  well: { id: "well", name: "Poço", footprint: DECO_ONE },
+  "high-ground-outcrop": { id: "high-ground-outcrop", name: "Terreno Elevado", footprint: DECO_ONE, tile: "hill" },
+  "stone-fountain": { id: "stone-fountain", name: "Fonte de Pedra", footprint: DECO_ONE },
+  tombstones: { id: "tombstones", name: "Lápides", footprint: DECO_ONE },
+  "spike-rocks-2": { id: "spike-rocks-2", name: "Agulhas de Pedra II", footprint: DECO_PAIR, tile: "column" },
+  lamppost: { id: "lamppost", name: "Poste de Lampião", footprint: DECO_ONE },
+  "mossy-rocks": { id: "mossy-rocks", name: "Pedras Musgosas", footprint: DECO_PAIR, tile: "column" },
+  "jagged-ridge": { id: "jagged-ridge", name: "Crista Irregular", footprint: DECO_PAIR, tile: "hill" },
+  "mossy-boulder": { id: "mossy-boulder", name: "Pedregulho Musgoso", footprint: DECO_ONE, tile: "column" },
+  "mountain-range": { id: "mountain-range", name: "Cadeia de Montanhas", footprint: DECO_TRIO, tile: "hill" },
+  "rune-stone": { id: "rune-stone", name: "Menir Rúnico", footprint: DECO_ONE },
+  "burning-hamlet": { id: "burning-hamlet", name: "Vilarejo em Chamas", footprint: DECO_PAIR, tile: "highruin" },
+  "boulder-mound": { id: "boulder-mound", name: "Monte de Pedras", footprint: DECO_ONE, tile: "column" },
+  "wooden-cart": { id: "wooden-cart", name: "Carroça de Madeira", footprint: DECO_ONE },
+  "spike-crown": { id: "spike-crown", name: "Coroa de Espinhos", footprint: DECO_TRIO, tile: "column" },
 };
 
 /** Every track in public/game/MUSIC, by file name, A-Z.
@@ -392,6 +419,59 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     sprite: "wardog",
     size: 2,
     footprintOffsets: FOOTPRINT_TYPE_3,
+    init: 6,
+  },
+  // Stats are a first pass — placeholder numbers to get it on the board, to be balanced later.
+  morvenianWolf: {
+    id: "morvenianWolf",
+    name: "Lobo Morveniano",
+    role: "Fera",
+    hp: 34,
+    atk: 10,
+    mag: 0,
+    def: 2,
+    res: 1,
+    mov: 6,
+    minRange: 1,
+    maxRange: 1,
+    sprite: "morvenian-wolf",
+    size: 2,
+    footprintOffsets: FOOTPRINT_TYPE_2,
+    init: 7,
+  },
+  // Stats are a first pass — placeholder numbers to get it on the board, to be balanced later.
+  butcher: {
+    id: "butcher",
+    name: "Açougueiro",
+    role: "Carrasco",
+    hp: 55,
+    atk: 13,
+    mag: 0,
+    def: 6,
+    res: 2,
+    mov: 3,
+    minRange: 1,
+    maxRange: 1,
+    sprite: "butcher",
+    size: 1,
+    init: 5,
+  },
+  // Stats are a first pass — placeholder numbers to get it on the board, to be balanced later.
+  birolho: {
+    id: "birolho",
+    name: "Birolho",
+    role: "Abominação",
+    hp: 78,
+    atk: 12,
+    mag: 0,
+    def: 4,
+    res: 4,
+    mov: 3,
+    minRange: 1,
+    maxRange: 1,
+    sprite: "birolho",
+    size: 4,
+    footprintOffsets: FOOTPRINT_TYPE_7,
     init: 6,
   },
   cultist: {
@@ -788,6 +868,9 @@ export const GROWTH: Record<ClassId, { hp: number; atk: number; mag: number; def
   brigand: { hp: 3, atk: 2, mag: 0, def: 1, res: 1 },
   captain: { hp: 4, atk: 2, mag: 0, def: 2, res: 1 },
   wardog: { hp: 4, atk: 2, mag: 0, def: 2, res: 1 },
+  morvenianWolf: { hp: 4, atk: 2, mag: 0, def: 2, res: 1 },
+  butcher: { hp: 4, atk: 2, mag: 0, def: 2, res: 1 },
+  birolho: { hp: 4, atk: 2, mag: 0, def: 2, res: 2 },
   cultist: { hp: 3, atk: 0, mag: 2, def: 1, res: 2 },
   horror: { hp: 4, atk: 2, mag: 0, def: 2, res: 2 },
   asherah: { hp: 5, atk: 2, mag: 0, def: 2, res: 2 },
@@ -1460,6 +1543,9 @@ export const EMBER_DROP: Partial<Record<ClassId, number>> = {
   brigand: 2,
   pikeman: 3,
   wardog: 2,
+  morvenianWolf: 3,
+  butcher: 5,
+  birolho: 9,
   swampBlueCalf: 2,
   cultist: 4,
   captain: 6,
