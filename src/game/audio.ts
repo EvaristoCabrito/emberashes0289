@@ -182,6 +182,17 @@ function noise(dur: number, gain = 0.22): void {
   src.stop(t0 + dur + 0.02);
 }
 
+/** One-shot effect from a file in public/game/MUSIC/SoundFX, layered over whatever music or
+ * synthesised beep is already playing rather than replacing it — unlike playFile, this never
+ * touches the theme/track elements, so it can't interrupt them. A fresh Audio() per call: the
+ * previous play is left to finish on its own instead of being cut short by the next one. */
+function playSfxFile(file: string, volume = 0.55): void {
+  if (muted || typeof Audio === "undefined") return;
+  const el = new Audio(`/game/MUSIC/SoundFX/${file}`);
+  el.volume = volume;
+  el.play().catch(() => {});
+}
+
 export const sfxPlay = {
   select: () => beep(520, 0.08, "triangle", 0.22),
   move: () => beep(180, 0.1, "sine", 0.2, -40),
@@ -235,6 +246,7 @@ export const sfxPlay = {
     beep(160, 0.2, "square", 0.2, -140);
     setTimeout(() => beep(90, 0.18, "sawtooth", 0.18, -60), 90);
   },
+  levelUp: () => playSfxFile("LevelUp.mp3", 0.6),
 };
 
 let introEl: HTMLAudioElement | null = null;

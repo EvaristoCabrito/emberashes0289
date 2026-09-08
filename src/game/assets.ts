@@ -11,7 +11,7 @@ export const TILE_VARIANT_COUNT: Record<TerrainId, number> = {
   ruins: 4,
   water: 17,
   ember: 3,
-  hill: 2,
+  hill: 3,
   flame: 2,
   column: 2,
   nave: 1,
@@ -32,7 +32,7 @@ export function tileVariantName(id: TerrainId, variant: number): string {
 }
 
 export function tileVariantSrc(id: TerrainId, variant: number): string {
-  return `/game/tiles/${tileVariantName(id, variant)}.png?v=39`;
+  return `/game/tiles/${tileVariantName(id, variant)}.png?v=40`;
 }
 const TILES = Object.keys(TILE_VARIANT_COUNT) as TerrainId[];
 const SPRITES: SpriteId[] = ["kael", "nira", "voss", "salazar", "malrec", "aldric", "soldier", "brigand", "captain", "sorcerer", "horror", "Asherah", "pikeman", "wardog", "troll", "morvenian-wolf", "butcher", "birolho", "familiar", "swamp-blue-calf", "ancient-golem"];
@@ -137,6 +137,19 @@ export async function loadGameArt(): Promise<GameArt> {
       attacks[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/atk-${i + 1}.png${bust}`)));
     }),
   );
+  // Cast pose: cast-*.png, same shape as the attack table — a sprite absent from here falls
+  // back to its attacks cut (the melee swing) for a spell just like it always did before this
+  // existed.
+  const CAST_FRAMES: Partial<Record<SpriteId, { n: number; bust: string }>> = {
+    birolho: { n: 3, bust: "" },
+  };
+  const casts: Partial<Record<SpriteId, HTMLImageElement[]>> = {};
+  await Promise.all(
+    (Object.keys(CAST_FRAMES) as SpriteId[]).map(async (id) => {
+      const { n, bust } = CAST_FRAMES[id]!;
+      casts[id] = await Promise.all(Array.from({ length: n }, (_, i) => loadImage(`/game/sprites/${id}/cast-${i + 1}.png${bust}`)));
+    }),
+  );
   // Walk cycles: move-*.png, same shape as the attack table. A sprite absent from here has
   // no walk cut and falls back to its idle loop played faster, as every sprite used to.
   const WALK_FRAMES: Partial<Record<SpriteId, { n: number; bust: string }>> = {
@@ -176,5 +189,5 @@ export async function loadGameArt(): Promise<GameArt> {
       side: await loadImage("/game/sprites/butcher/front.png"),
     },
   };
-  return { tiles, decorations, sprites, attacks, walks, idles, walkDirs, impact, backdrops };
+  return { tiles, decorations, sprites, attacks, casts, walks, idles, walkDirs, impact, backdrops };
 }

@@ -545,6 +545,9 @@ export interface GameArt {
   decorations: Record<string, HTMLImageElement>;
   sprites: Record<SpriteId, HTMLImageElement[]>;
   attacks: Partial<Record<SpriteId, HTMLImageElement[]>>;
+  /** A distinct pose for casting a spell, for the few sprites that have one cut — falls back
+   * to `attacks` (the melee swing) for every sprite without one, same as it always did. */
+  casts: Partial<Record<SpriteId, HTMLImageElement[]>>;
   /** Walk cycles, for the sprites that have one cut. Played only while a unit is actually
    * moving; a sprite without one keeps falling back to its idle loop run faster, which is
    * what every sprite did before walk cycles existed. */

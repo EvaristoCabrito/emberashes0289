@@ -79,6 +79,72 @@ interface Particle {
 const PARTICLE_CAP = 32;
 const ZOOM_RADII = [22, 34, 50, 72];
 
+/** Level-up flourish: a small pixel-space burst anchored to a unit's hex (recomputed every
+ * frame from its live position, so it still tracks correctly if the unit somehow moves mid-
+ * burst) rather than routed through the hex-grid-snapped Particle system above — that one
+ * always renders at its host hex's exact center, which is right for a hit-spark but too
+ * coarse for sparks that are meant to actually scatter. */
+interface LevelUpSpark {
+  live: boolean;
+  unitId: string;
+  kind: "ring" | "star";
+  /** Offset from the unit's hex center, in pixels at the burst's own tile scale — rescaled by
+   * the live cell size at draw time so it still reads right after a zoom change. */
+  dx: number;
+  dy: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  size: number;
+  hue: number;
+  rot: number;
+  vrot: number;
+  refCell: number;
+}
+
+const LEVEL_UP_FX_CAP = 44;
+
+function blankLevelUpSpark(): LevelUpSpark {
+  return {
+    live: false,
+    unitId: "",
+    kind: "star",
+    dx: 0,
+    dy: 0,
+    vx: 0,
+    vy: 0,
+    life: 0,
+    max: 1,
+    size: 1,
+    hue: 46,
+    rot: 0,
+    vrot: 0,
+    refCell: 1,
+  };
+}
+
+/** A traveling spell bolt (currently just Magic Missile) — hex-to-hex in pixel space, timed to
+ * land right as stepSpell's own hit/damage tick fires (a.t >= 0.18), so the streak and the
+ * impact flash/number line up without the two systems knowing about each other. */
+interface MissileFx {
+  live: boolean;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  t: number;
+  max: number;
+  hue: number;
+  seed: number;
+}
+
+const MISSILE_FX_CAP = 12;
+
+function blankMissileFx(): MissileFx {
+  return { live: false, fromX: 0, fromY: 0, toX: 0, toY: 0, t: 0, max: 0.17, hue: 268, seed: 0 };
+}
+
 function blankParticle(): Particle {
   return {
     live: false,
@@ -514,6 +580,10 @@ export class BattleEngine {
   private active: Active | null = null;
   private particles: Particle[] = Array.from({ length: PARTICLE_CAP }, blankParticle);
   private particleLive = 0;
+  private levelUpFx: LevelUpSpark[] = Array.from({ length: LEVEL_UP_FX_CAP }, blankLevelUpSpark);
+  private levelUpFxLive = 0;
+  private missileFx: MissileFx[] = Array.from({ length: MISSILE_FX_CAP }, blankMissileFx);
+  private missileFxLive = 0;
   private onNextIdle: (() => void) | null = null;
   private rng: () => number;
   private listeners = new Set<() => void>();
@@ -814,6 +884,36 @@ export class BattleEngine {
       }
       this.particleLive = live;
     }
+    if (this.levelUpFxLive) {
+      let live = 0;
+      for (const s of this.levelUpFx) {
+        if (!s.live) continue;
+        s.life += cap;
+        if (s.life >= s.max) {
+          s.live = false;
+          continue;
+        }
+        s.dx += s.vx * cap;
+        s.dy += s.vy * cap;
+        s.vy += s.refCell * 0.9 * cap;
+        s.rot += s.vrot * cap;
+        live += 1;
+      }
+      this.levelUpFxLive = live;
+    }
+    if (this.missileFxLive) {
+      let live = 0;
+      for (const m of this.missileFx) {
+        if (!m.live) continue;
+        m.t += cap;
+        if (m.t >= m.max) {
+          m.live = false;
+          continue;
+        }
+        live += 1;
+      }
+      this.missileFxLive = live;
+    }
     if (this.hitstop > 0) {
       this.hitstop -= cap;
       this.emit();
@@ -885,6 +985,10 @@ export class BattleEngine {
       };
       this.banner = step.label ?? "";
       sfxPlay.crit();
+      if (step.spellKind === "magicMissile") {
+        const caster = this.units.find((u) => u.id === step.att);
+        if (caster) for (const t of step.tiles) this.emitMissileFx(caster.x, caster.y, t.x, t.y);
+      }
     } else if (step.type === "heal") {
       this.active = { type: "heal", att: step.att, def: step.def, kind: step.kind, t: 0, applied: false };
       this.banner = CURES[step.kind].name;
@@ -1411,6 +1515,8 @@ export class BattleEngine {
       if (gain > 0) u.spells[key] += gain;
     }
     this.tip = `${u.name} subiu para o nível ${to}!`;
+    this.emitLevelUpFx(u);
+    sfxPlay.levelUp();
   }
 
   private curePlayerDisease(u: Unit): void {
@@ -1670,6 +1776,95 @@ export class BattleEngine {
     slot.text = init.text;
     slot.kind = init.kind;
     slot.frame = init.frame;
+  }
+
+  /** Golden burst played once when a unit levels up: one expanding ring plus a scatter of
+   * small stars, all anchored to the unit's hex and drifting in real pixel space (see
+   * LevelUpSpark) rather than the grid-snapped Particle system above. */
+  private emitLevelUpFx(u: Unit): void {
+    if (this.reducedMotion) return;
+    const cell = this.layout.tile;
+    const claim = (): LevelUpSpark | undefined => {
+      let slot = this.levelUpFx.find((s) => !s.live);
+      if (slot) {
+        this.levelUpFxLive += 1;
+        return slot;
+      }
+      slot = this.levelUpFx[0];
+      let oldest = 0;
+      for (const s of this.levelUpFx) {
+        if (s.life / s.max > oldest) {
+          oldest = s.life / s.max;
+          slot = s;
+        }
+      }
+      return slot;
+    };
+    const spawn = (init: Omit<LevelUpSpark, "live">) => {
+      const slot = claim();
+      if (!slot) return;
+      Object.assign(slot, init, { live: true });
+    };
+    spawn({
+      unitId: u.id,
+      kind: "ring",
+      dx: 0,
+      dy: -cell * 0.55,
+      vx: 0,
+      vy: 0,
+      life: 0,
+      max: 0.55,
+      size: 0,
+      hue: 46,
+      rot: 0,
+      vrot: 0,
+      refCell: cell,
+    });
+    const n = 18;
+    for (let i = 0; i < n; i++) {
+      const angle = (Math.PI * 2 * i) / n + (this.rng() - 0.5) * 0.4;
+      const speed = cell * (0.9 + this.rng() * 1.1);
+      spawn({
+        unitId: u.id,
+        kind: "star",
+        dx: 0,
+        dy: -cell * 0.55,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed * 0.7 - cell * 0.6,
+        life: 0,
+        max: 0.85 + this.rng() * 0.5,
+        size: cell * (0.05 + this.rng() * 0.05),
+        hue: 42 + this.rng() * 20,
+        rot: this.rng() * Math.PI,
+        vrot: (this.rng() - 0.5) * 6,
+        refCell: cell,
+      });
+    }
+  }
+
+  /** One glowing bolt per target, hex-to-hex — see MissileFx. */
+  private emitMissileFx(fromX: number, fromY: number, toX: number, toY: number): void {
+    if (this.reducedMotion) return;
+    let slot = this.missileFx.find((m) => !m.live);
+    if (!slot) {
+      slot = this.missileFx[0]!;
+      let oldest = 0;
+      for (const m of this.missileFx) {
+        if (m.t / m.max > oldest) {
+          oldest = m.t / m.max;
+          slot = m;
+        }
+      }
+    } else this.missileFxLive += 1;
+    slot.live = true;
+    slot.fromX = fromX;
+    slot.fromY = fromY;
+    slot.toX = toX;
+    slot.toY = toY;
+    slot.t = 0;
+    slot.max = 0.17;
+    slot.hue = 268;
+    slot.seed = this.rng() * Math.PI * 2;
   }
 
   private spawnHit(target: Unit, dmg: number, crit: boolean): void {
@@ -4343,10 +4538,26 @@ export class BattleEngine {
   }
 
   private attackPose(u: Unit): number | null {
-    const frames = this.art.attacks[u.sprite];
-    if (!frames || frames.length < 4) return null;
     const a = this.active;
     if (!a) return null;
+    // A dedicated cast pose (currently just Birolho's cast-*.png), for a spell or heal only —
+    // falls back to the melee attacks cut for every sprite without one, same as before this
+    // existed. Checked first so a caster with both never mixes an index meant for one pool's
+    // frame count into the other.
+    if ((a.type === "spell" || a.type === "heal") && a.att === u.id) {
+      const castFrames = this.art.casts[u.sprite] ?? this.art.attacks[u.sprite];
+      if (!castFrames || castFrames.length < 3) return null;
+      const n = castFrames.length;
+      if (n === 4) {
+        if (a.t < 0.12) return 0;
+        if (a.t < 0.22) return 1;
+        if (a.t < 0.4) return 2;
+        return 3;
+      }
+      return Math.min(n - 1, Math.floor(Math.min(0.99, a.t / 0.4) * n));
+    }
+    const frames = this.art.attacks[u.sprite];
+    if (!frames || frames.length < 4) return null;
     const n = frames.length;
     const long = n >= 12;
     if (a.type === "combat") {
@@ -4370,15 +4581,6 @@ export class BattleEngine {
       if (a.stage === "hit" || a.stage === "counterHit") return span(lungeEnd + 1, hitEnd, a.t / 0.18);
       if (a.stage === "recover" || a.stage === "counterRecover") return span(hitEnd + 1, n - 1, a.t / 0.16);
       return n - 1;
-    }
-    if ((a.type === "spell" || a.type === "heal") && a.att === u.id) {
-      if (n === 4) {
-        if (a.t < 0.12) return 0;
-        if (a.t < 0.22) return 1;
-        if (a.t < 0.4) return 2;
-        return 3;
-      }
-      return Math.min(n - 1, Math.floor(Math.min(0.99, a.t / 0.4) * n));
     }
     return null;
   }
@@ -4727,7 +4929,11 @@ export class BattleEngine {
       // While moving, a sprite that has a walk cut plays it; one that doesn't falls back to
       // its idle loop, which idleFrame already runs faster for a moving unit.
       const walk = atk == null && moving ? this.art.walks[u.sprite] : undefined;
-      const frames = atk != null ? this.art.attacks[u.sprite] : walk ?? idle ?? this.art.sprites[u.sprite];
+      // attackPose computes its index against whichever pool it picked (casts for a spell/heal
+      // cast, when the caster has one — attacks otherwise), so this has to mirror that same
+      // choice or the index lands in the wrong array.
+      const casting = this.active && (this.active.type === "spell" || this.active.type === "heal") && this.active.att === u.id;
+      const frames = atk != null ? (casting ? (this.art.casts[u.sprite] ?? this.art.attacks[u.sprite]) : this.art.attacks[u.sprite]) : walk ?? idle ?? this.art.sprites[u.sprite];
       const n = frames?.length ?? 0;
       const fi = atk != null ? atk : walk ? this.walkFrame(u, n) : this.idleFrame(u, n || 4);
       const walkDirs = moving ? this.art.walkDirs[u.sprite] : undefined;
@@ -4830,6 +5036,106 @@ export class BattleEngine {
         ctx.fillStyle = p.color;
         ctx.strokeText(p.text, cx, cy - dmgCell * 0.85 - p.life * 16);
         ctx.fillText(p.text, cx, cy - dmgCell * 0.85 - p.life * 16);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.levelUpFxLive) {
+      for (const s of this.levelUpFx) {
+        if (!s.live) continue;
+        const unit = this.units.find((u) => u.id === s.unitId);
+        if (!unit) continue;
+        const { cx, cy } = this.hexCenter(Math.round(unit.x), Math.round(unit.y));
+        const x = cx + s.dx;
+        const y = cy + s.dy;
+        const k = s.life / s.max;
+        if (s.kind === "ring") {
+          const r = s.refCell * (0.15 + k * 1.25);
+          ctx.globalAlpha = Math.max(0, 1 - k) * 0.85;
+          ctx.strokeStyle = `hsl(${s.hue}, 95%, 68%)`;
+          ctx.lineWidth = Math.max(1.5, s.refCell * 0.05 * (1 - k));
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          if (k < 0.3) {
+            const flash = ctx.createRadialGradient(x, y, 0, x, y, s.refCell * 0.5);
+            flash.addColorStop(0, `rgba(255,250,220,${0.6 * (1 - k / 0.3)})`);
+            flash.addColorStop(1, "rgba(255,250,220,0)");
+            ctx.fillStyle = flash;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(x, y, s.refCell * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          continue;
+        }
+        const fade = k < 0.15 ? k / 0.15 : k > 0.7 ? Math.max(0, 1 - (k - 0.7) / 0.3) : 1;
+        ctx.globalAlpha = fade;
+        const size = s.size * (1 - k * 0.35);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(s.rot);
+        const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 2.2);
+        glow.addColorStop(0, `hsla(${s.hue}, 100%, 82%, 0.9)`);
+        glow.addColorStop(1, `hsla(${s.hue}, 100%, 60%, 0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(0, 0, size * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `hsl(${s.hue}, 95%, 78%)`;
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const ang = (Math.PI / 4) * i;
+          const r = i % 2 === 0 ? size : size * 0.35;
+          const px = Math.cos(ang) * r;
+          const py = Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.missileFxLive) {
+      for (const m of this.missileFx) {
+        if (!m.live) continue;
+        const from = this.hexCenter(m.fromX, m.fromY);
+        const to = this.hexCenter(m.toX, m.toY);
+        const dxT = to.cx - from.cx;
+        const dyT = to.cy - from.cy;
+        const dist = Math.hypot(dxT, dyT) || 1;
+        const nx = -dyT / dist;
+        const ny = dxT / dist;
+        const along = (k: number) => {
+          const wave = Math.sin(k * Math.PI * 2.4 + m.seed) * tile * 0.16 * (1 - k * 0.6);
+          return { x: from.cx + dxT * k + nx * wave, y: from.cy - tile * 0.3 + dyT * k + ny * wave };
+        };
+        const k = Math.min(1, m.t / m.max);
+        // A short comet trail: a handful of ghost positions just behind the head, fading and
+        // shrinking with distance from it.
+        for (let i = 5; i >= 0; i--) {
+          const tk = Math.max(0, k - i * 0.045);
+          const p = along(tk);
+          const fade = (1 - i / 6) * Math.max(0, 1 - k * 0.15);
+          const r = tile * (0.1 - i * 0.012);
+          if (r <= 0) continue;
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 2.4);
+          g.addColorStop(0, `hsla(${m.hue}, 95%, 82%, ${fade})`);
+          g.addColorStop(0.4, `hsla(${m.hue}, 90%, 62%, ${fade * 0.7})`);
+          g.addColorStop(1, `hsla(${m.hue}, 90%, 55%, 0)`);
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r * 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        const head = along(k);
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, tile * 0.05, 0, Math.PI * 2);
+        ctx.fill();
       }
       ctx.globalAlpha = 1;
     }

@@ -109,7 +109,6 @@ export const DECORATIONS: Record<string, DecorationDef> = {
   "burning-house": { id: "burning-house", name: "Casa em Chamas", footprint: DECO_ONE, tile: "highruin" },
   "burnt-house-ruins": { id: "burnt-house-ruins", name: "Ruínas Queimadas", footprint: DECO_ONE, tile: "highruin" },
   well: { id: "well", name: "Poço", footprint: DECO_ONE },
-  "high-ground-outcrop": { id: "high-ground-outcrop", name: "Terreno Elevado", footprint: DECO_ONE, tile: "hill" },
   "stone-fountain": { id: "stone-fountain", name: "Fonte de Pedra", footprint: DECO_ONE },
   tombstones: { id: "tombstones", name: "Lápides", footprint: DECO_ONE },
   "spike-rocks-2": { id: "spike-rocks-2", name: "Agulhas de Pedra II", footprint: DECO_PAIR, tile: "column" },
@@ -521,7 +520,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     maxRange: 1,
     sprite: "Asherah",
     size: 4,
-    footprintOffsets: FOOTPRINT_TYPE_8,
+    footprintOffsets: FOOTPRINT_TYPE_7,
     init: 7,
   },
   // A stone construct on the troll's footprint — same 320x320 cut, same FOOTPRINT_TYPE_8
@@ -550,7 +549,7 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     maxRange: 2,
     sprite: "ancient-golem",
     size: 4,
-    footprintOffsets: FOOTPRINT_TYPE_8,
+    footprintOffsets: FOOTPRINT_TYPE_7,
     init: 9,
   },
   troll: {
