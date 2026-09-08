@@ -3383,7 +3383,7 @@ function applyDeadGround(mission: Mission): Mission {
  * is clear, kept off the spawns, and rolled back if it would cut the map in two. Unlike the
  * rest of the dressing this uses real randomness, so pressing the button again gives a
  * different board instead of repeating the last one. */
-export function scatterDecor(m: Mission): Mission {
+export function scatterDecor(m: Mission, excludeIds?: ReadonlySet<string>): Mission {
   const tiles = parseLayout(m.layout);
   const walkableTile = (t: TerrainId | undefined) => !!t && TERRAIN[t].passable;
   const taken = new Set<string>(decorationCells(m.decorations ?? []));
@@ -3412,11 +3412,15 @@ export function scatterDecor(m: Mission): Mission {
     return false;
   };
 
-  const ids = Object.keys(DECORATIONS);
+  // The Map Editor lets the author opt specific props out of this pool (per direct
+  // instruction) — a piece that's too distinctive to see scattered at random, without
+  // pulling it out of DECORATIONS entirely and losing manual placement too.
+  const ids = Object.keys(DECORATIONS).filter((id) => !excludeIds?.has(id));
   // Uncapped and generous: scenery is the thing a board should have lots of, and anything
   // unwanted is a click to clear.
   const want = Math.max(3, Math.round(((m.cols * m.rows) / 288) * 10));
   const placed: DecorationPlacement[] = [...(m.decorations ?? [])];
+  if (ids.length === 0) return { ...m, decorations: placed };
 
   for (let tries = 0, done = 0; tries < want * 40 && done < want; tries++) {
     const id = ids[Math.floor(Math.random() * ids.length)]!;
@@ -3441,8 +3445,8 @@ export function scatterDecor(m: Mission): Mission {
  * scatter, then columns rocked into props, then the open-ground pass that adds chests and
  * decoration. The Map Editor's "Gerar terreno" calls this so the board it fills matches
  * what a real mission would look like, rather than only the first of the three. */
-export function dressMap(m: Mission): Mission {
-  return scatterDecor(decorateOpenTerrain(rockifyColumns(scatterTactics(m))));
+export function dressMap(m: Mission, excludeIds?: ReadonlySet<string>): Mission {
+  return scatterDecor(decorateOpenTerrain(rockifyColumns(scatterTactics(m))), excludeIds);
 }
 
 export const MISSIONS: Mission[] = expandMaps(RAW_MISSIONS).map(rockifyColumns).map(decorateOpenTerrain).map(applyDeadGround);

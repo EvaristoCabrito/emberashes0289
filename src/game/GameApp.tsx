@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Pencil, RotateCcw, Shield, Shuffle, Swords, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronLeft, Dices, Pencil, RotateCcw, Shield, Shuffle, Swords, Volume2, VolumeX, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { loadGameArt, TILE_VARIANT_COUNT, tileVariantName, tileVariantSrc } from "./assets";
 import { installAudioUnlock, playFile, playMenuMusic, playTheme, resumeAudio, setMuted, sfxPlay, stopMusic, unlockAudio } from "./audio";
@@ -1728,6 +1728,7 @@ function cellIndex(x: number, y: number, cols: number, rows: number): number {
 
 const MAP_VERSIONS_KEY = "ember-map-versions";
 const MAP_ACTIVE_KEY = "ember-map-active";
+const DECO_SHUFFLE_EXCLUDE_KEY = "ember-deco-shuffle-exclude";
 const EDITOR_COLS_DEFAULT = 10;
 const EDITOR_ROWS_DEFAULT = 8;
 
@@ -1934,6 +1935,28 @@ function saveActiveVersions(map: Record<string, number>) {
   }
 }
 
+/** Decoration ids "Gerar terreno" leaves out of its random scatter — per direct
+ * instruction, a prop can be too distinctive to want scattered at random without pulling
+ * it out of DECORATIONS entirely and losing manual placement too. Browser-local, same as
+ * the version store: this is an editor preference, not campaign data. */
+function loadDecoShuffleExclude(): string[] {
+  try {
+    const raw = window.localStorage.getItem(DECO_SHUFFLE_EXCLUDE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDecoShuffleExclude(ids: string[]) {
+  try {
+    window.localStorage.setItem(DECO_SHUFFLE_EXCLUDE_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore
+  }
+}
+
 /** Resolves a mission id for REAL play (not the editor's own playtest): an activated
  * custom version takes precedence over the immutable static MISSIONS data, so authoring
  * a scenario in the Map Editor can actually replace what the campaign plays without ever
@@ -2031,6 +2054,16 @@ function MapEditorScreen({
   // spawn's level) would be wasted work it can't even show — debounce to the pause after a
   // real edit instead.
   const [previewMission, setPreviewMission] = useState<Mission | null>(null);
+  const [shuffleExclude, setShuffleExclude] = useState<Set<string>>(() => new Set(loadDecoShuffleExclude()));
+  const toggleShuffleExclude = (id: string) => {
+    setShuffleExclude((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveDecoShuffleExclude([...next]);
+      return next;
+    });
+  };
   const [versionStore, setVersionStore] = useState<Record<string, MapVersion[]>>(() => loadVersionStore());
   const [activeVersions, setActiveVersions] = useState<Record<string, number>>(() => loadActiveVersions());
   const [draft, setDraft] = useState<MapDraft>(() => initialDraft ?? blankDraft());
@@ -2632,7 +2665,7 @@ function MapEditorScreen({
               // Generate replaces, it does not pile on: the decoration pass appends to what
               // it is handed, so without clearing first a second press stacked scenery on
               // top of the last lot.
-              const filled = dressMap(draftToMission({ ...draft, autoTactics: true, decorations: [] }));
+              const filled = dressMap(draftToMission({ ...draft, autoTactics: true, decorations: [] }), shuffleExclude);
               const tiles = parseLayout(filled.layout);
               // The scatter paints barricades as terrain; they are a decoration now, so the
               // props come back with them — same derivation the engine does on load.
@@ -2998,19 +3031,45 @@ function MapEditorScreen({
                 {turningDeco ? "Girando — clique numa decoração" : "Girar objeto"}
               </Button>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              {decorOptions.map((dec) => (
-                <button
-                  key={dec.id}
-                  type="button"
-                  title={`${dec.name} · ${dec.footprint.length} hexes`}
-                  onClick={() => setDecoBrush(dec.id)}
-                  className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border ${decoBrush === dec.id ? "border-accent" : "border-border"}`}
-                >
-                  <img src={decorationImage(dec.id)} alt="" className="size-6 rounded-sm object-cover bg-bg" />
-                  {dec.name}
-                </button>
-              ))}
+            <p className="text-xs text-muted">
+              O dado em cada uma liga/desliga se ela pode sair no sorteio de "Gerar terreno" — aceso participa, apagado só
+              entra no mapa se você colocar à mão.
+            </p>
+            <div className="overflow-auto resize border border-border rounded-md p-1.5 bg-bg/40 h-24 min-h-[86px] min-w-[280px] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:bg-bg/60 [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full">
+              <div className="grid grid-rows-2 grid-flow-col auto-cols-max gap-1.5">
+                {decorOptions.map((dec) => {
+                  const excluded = shuffleExclude.has(dec.id);
+                  return (
+                    <div
+                      key={dec.id}
+                      className={`flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded-md border ${decoBrush === dec.id ? "border-accent" : "border-border"}`}
+                    >
+                      <button
+                        type="button"
+                        title={`${dec.name} · ${dec.footprint.length} hexes`}
+                        onClick={() => setDecoBrush(dec.id)}
+                        className="flex items-center gap-1.5"
+                      >
+                        <img src={decorationImage(dec.id)} alt="" className="size-6 rounded-sm object-cover bg-bg" />
+                        {dec.name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleShuffleExclude(dec.id)}
+                        className={`px-1 ${excluded ? "text-muted" : "text-accent"}`}
+                        aria-label={excluded ? `${dec.name}: fora do sorteio` : `${dec.name}: no sorteio`}
+                        title={
+                          excluded
+                            ? 'Fora do sorteio de "Gerar terreno" — clique pra incluir'
+                            : 'No sorteio de "Gerar terreno" — clique pra excluir'
+                        }
+                      >
+                        <Dices className="size-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
