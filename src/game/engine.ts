@@ -125,9 +125,23 @@ function blankLevelUpSpark(): LevelUpSpark {
   };
 }
 
+/** How long Magic Missile's bolt takes to reach its target — stepSpell's own hit/damage tick
+ * for a magicMissile cast fires at exactly this time (see MISSILE_HIT_AT below) instead of
+ * the normal 0.18, so slowing this down keeps the impact flash/number landing right as the
+ * bolt visually arrives instead of drifting out of sync with it. */
+const MISSILE_TRAVEL = 0.34;
+/** stepSpell's hit tick, per spellKind — every other spell keeps the original 0.18; only
+ * Magic Missile's is tied to its own (now longer) travel time. */
+const MISSILE_HIT_AT = MISSILE_TRAVEL;
+/** How much longer the bolt's glowing trail lingers on screen, fading, after the bolt
+ * itself has already landed. Kept short enough that MISSILE_TRAVEL + this stays under 0.55
+ * — stepSpell's own finishCombat threshold for every spell — so the trail's afterglow never
+ * outlives the active step it belongs to. */
+const MISSILE_AFTERGLOW = 0.2;
+
 /** A traveling spell bolt (currently just Magic Missile) — hex-to-hex in pixel space, timed to
- * land right as stepSpell's own hit/damage tick fires (a.t >= 0.18), so the streak and the
- * impact flash/number line up without the two systems knowing about each other. */
+ * land right as stepSpell's own hit/damage tick fires (a.t >= MISSILE_HIT_AT), so the streak
+ * and the impact flash/number line up without the two systems knowing about each other. */
 interface MissileFx {
   live: boolean;
   fromX: number;
@@ -143,7 +157,45 @@ interface MissileFx {
 const MISSILE_FX_CAP = 12;
 
 function blankMissileFx(): MissileFx {
-  return { live: false, fromX: 0, fromY: 0, toX: 0, toY: 0, t: 0, max: 0.17, hue: 268, seed: 0 };
+  return { live: false, fromX: 0, fromY: 0, toX: 0, toY: 0, t: 0, max: MISSILE_TRAVEL + MISSILE_AFTERGLOW, hue: 268, seed: 0 };
+}
+
+/** How long the Lightning strike's flash lasts, start to fully faded — short and sudden on
+ * purpose, a real strike rather than a travelling bolt. */
+const LIGHTNING_STRIKE_DUR = 0.42;
+/** How many hexes of "sky" the bolt is drawn falling from, above the struck hex. */
+const LIGHTNING_FALL_HEIGHT = 3.2;
+
+/** One fork off the main bolt — its own short jagged line, peeling away partway down. */
+interface LightningBranch {
+  /** 0-1, how far down the main bolt this fork leaves it. */
+  at: number;
+  /** -1 or 1: which side it forks toward. */
+  side: number;
+  /** Lateral jitter per segment, as a fraction of a tile — fixed at emit time so the bolt
+   * holds a steady shape across its short life instead of jittering frame to frame. */
+  segs: number[];
+}
+
+/** A bolt struck down from directly above a hex — thick, jagged, forked, gone in well under
+ * half a second. The zigzag and branch shapes are generated once at emit time (see
+ * emitLightningFx) and just fade over `t`, rather than being redrawn randomly every frame,
+ * so the bolt reads as one firm, deliberate strike instead of a flickering scribble. */
+interface LightningFx {
+  live: boolean;
+  x: number;
+  y: number;
+  t: number;
+  max: number;
+  hue: number;
+  segs: number[];
+  branches: LightningBranch[];
+}
+
+const LIGHTNING_FX_CAP = 6;
+
+function blankLightningFx(): LightningFx {
+  return { live: false, x: 0, y: 0, t: 0, max: LIGHTNING_STRIKE_DUR, hue: 205, segs: [], branches: [] };
 }
 
 function blankParticle(): Particle {
@@ -408,6 +460,7 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
     drawY: spawn.y,
     flash: 0,
     levelGlow: 0,
+    healGlow: 0,
     fade: 1,
     bob: 0,
     level,
@@ -589,6 +642,8 @@ export class BattleEngine {
   private levelUpFxLive = 0;
   private missileFx: MissileFx[] = Array.from({ length: MISSILE_FX_CAP }, blankMissileFx);
   private missileFxLive = 0;
+  private lightningFx: LightningFx[] = Array.from({ length: LIGHTNING_FX_CAP }, blankLightningFx);
+  private lightningFxLive = 0;
   private onNextIdle: (() => void) | null = null;
   private rng: () => number;
   private listeners = new Set<() => void>();
@@ -597,6 +652,9 @@ export class BattleEngine {
   private spellArmed = false;
   private spellAim: Point | null = null;
   private spellKind: SpellKind | null = null;
+  /** Set while mode === "awaitPotion": which potion the selected unit is about to use on
+   * whichever valid target (self or an adjacent ally — see confirmPotionAt) is tapped next. */
+  private potionAim: PotionId | null = null;
 
   constructor(mission: Mission, art: GameArt, roster: Roster, seed = 1) {
     this.mission = mission;
@@ -873,6 +931,7 @@ export class BattleEngine {
     for (const u of this.units) {
       if (u.flash > 0) u.flash = Math.max(0, u.flash - cap * 4);
       if (u.levelGlow > 0) u.levelGlow = Math.max(0, u.levelGlow - cap * 0.42);
+      if (u.healGlow > 0) u.healGlow = Math.max(0, u.healGlow - cap * 0.7);
       if (!u.alive && u.fade > 0) u.fade = Math.max(0, u.fade - cap * 2.4);
       if (u.alive) {
         const haste =
@@ -925,6 +984,19 @@ export class BattleEngine {
         live += 1;
       }
       this.missileFxLive = live;
+    }
+    if (this.lightningFxLive) {
+      let live = 0;
+      for (const l of this.lightningFx) {
+        if (!l.live) continue;
+        l.t += cap;
+        if (l.t >= l.max) {
+          l.live = false;
+          continue;
+        }
+        live += 1;
+      }
+      this.lightningFxLive = live;
     }
     if (this.hitstop > 0) {
       this.hitstop -= cap;
@@ -1000,6 +1072,9 @@ export class BattleEngine {
       if (step.spellKind === "magicMissile") {
         const caster = this.units.find((u) => u.id === step.att);
         if (caster) for (const t of step.tiles) this.emitMissileFx(caster.x, caster.y, t.x, t.y);
+      }
+      if (step.spellKind === "lightning") {
+        for (const t of step.tiles) this.emitLightningFx(t.x, t.y);
       }
     } else if (step.type === "heal") {
       this.active = { type: "heal", att: step.att, def: step.def, kind: step.kind, t: 0, applied: false };
@@ -1232,7 +1307,8 @@ export class BattleEngine {
       return;
     }
     a.t += dt;
-    if (!a.hit && a.t >= 0.18) {
+    const hitAt = a.spellKind === "magicMissile" ? MISSILE_HIT_AT : 0.18;
+    if (!a.hit && a.t >= hitAt) {
       a.hit = true;
       sfxPlay.spell();
       // AoE/line spells: the first enemy actually hit grants full XP, every enemy after
@@ -1393,6 +1469,7 @@ export class BattleEngine {
       });
       this.tip = `${CURES[a.kind].name} · +${gained} HP`;
       this.pushLog(`${att.name} curou ${target.name}: +${gained} HP`);
+      this.emitBeneficialGlow(target);
       sfxPlay.heal();
     }
     if (a.t >= 0.5) this.finishCombat(att);
@@ -1874,6 +1951,32 @@ export class BattleEngine {
     });
   }
 
+  /** A gentle light for a beneficial effect landing on a unit — a heal spell resolving or a
+   * potion being drunk — arming healGlow (see render()) plus a few soft pale motes drifting
+   * up off them. Deliberately smaller and quieter than emitLevelUpFx: this fires often
+   * (every heal, every potion), so it has to read as a light touch, not a fanfare. */
+  private emitBeneficialGlow(u: Unit): void {
+    u.healGlow = 1;
+    if (this.reducedMotion) return;
+    const n = 6;
+    for (let i = 0; i < n; i++) {
+      const ang = -Math.PI / 2 + (this.rng() - 0.5) * 1.6;
+      const speed = 0.5 + this.rng() * 0.6;
+      this.emitParticle({
+        x: u.drawX + (this.rng() - 0.5) * 0.5,
+        y: u.drawY - 0.1,
+        vx: Math.cos(ang) * speed * 0.3,
+        vy: Math.sin(ang) * speed - 0.3,
+        life: 0,
+        max: 0.7 + this.rng() * 0.3,
+        size: 2 + this.rng() * 2,
+        color: "#fff6df",
+        kind: "spark",
+        frame: 0,
+      });
+    }
+  }
+
   /** One glowing bolt per target, hex-to-hex — see MissileFx. */
   private emitMissileFx(fromX: number, fromY: number, toX: number, toY: number): void {
     if (this.reducedMotion) return;
@@ -1894,9 +1997,40 @@ export class BattleEngine {
     slot.toX = toX;
     slot.toY = toY;
     slot.t = 0;
-    slot.max = 0.17;
+    slot.max = MISSILE_TRAVEL + MISSILE_AFTERGLOW;
     slot.hue = 268;
     slot.seed = this.rng() * Math.PI * 2;
+  }
+
+  /** A bolt struck down onto one hex — see LightningFx. The jagged shape (main bolt plus
+   * 2-3 forks) is rolled once here so it stays put for the strike's whole short life. */
+  private emitLightningFx(x: number, y: number): void {
+    if (this.reducedMotion) return;
+    let slot = this.lightningFx.find((l) => !l.live);
+    if (!slot) {
+      slot = this.lightningFx[0]!;
+      let oldest = 0;
+      for (const l of this.lightningFx) {
+        if (l.t / l.max > oldest) {
+          oldest = l.t / l.max;
+          slot = l;
+        }
+      }
+    } else this.lightningFxLive += 1;
+    const rollSegs = (n: number, spread: number) => Array.from({ length: n }, () => (this.rng() - 0.5) * spread);
+    slot.live = true;
+    slot.x = x;
+    slot.y = y;
+    slot.t = 0;
+    slot.max = LIGHTNING_STRIKE_DUR;
+    slot.hue = 200 + this.rng() * 20;
+    slot.segs = rollSegs(9, 0.34);
+    const branchCount = 2 + Math.floor(this.rng() * 2);
+    slot.branches = Array.from({ length: branchCount }, () => ({
+      at: 0.3 + this.rng() * 0.45,
+      side: this.rng() < 0.5 ? -1 : 1,
+      segs: rollSegs(4, 0.4),
+    }));
   }
 
   private spawnHit(target: Unit, dmg: number, crit: boolean): void {
@@ -2115,6 +2249,12 @@ export class BattleEngine {
       this.spellAim = null;
       this.spellKind = null;
     this.missileTargets = [];
+      this.tip = null;
+      return;
+    }
+    if (this.mode === "awaitPotion") {
+      this.mode = "awaitAction";
+      this.potionAim = null;
       this.tip = null;
       return;
     }
@@ -3081,6 +3221,7 @@ export class BattleEngine {
       drawY: cell.y,
       flash: 0,
       levelGlow: 0,
+      healGlow: 0,
       fade: 1,
       bob: 0,
       level: unit.level,
@@ -3322,6 +3463,10 @@ export class BattleEngine {
     });
   }
 
+  /** Arms a potion: the next tap on self or an adjacent ally (see confirmPotionAt) applies
+   * it and spends the actor's turn. Self is always in range (distance 0), so this covers
+   * the old instant self-drink too — it just now takes the one confirming tap every other
+   * targeted action already asks for. */
   usePotion(kind: PotionId): void {
     const u = this.units.find((x) => x.id === this.selectedId);
     if (!u || u.side !== "player" || !u.alive || u.acted) return;
@@ -3329,19 +3474,54 @@ export class BattleEngine {
       return;
     if (this.phase !== "player" || this.result) return;
     if (u.bag[kind] <= 0) return;
+    this.mode = "awaitPotion";
+    this.potionAim = kind;
+    this.tip = `${potionLabel(kind)}: toque em você ou num aliado adjacente.`;
+    sfxPlay.ui();
+  }
+
+  /** Whether `cell` is a legal potion target for `actor`: an alive ally on their own hex or
+   * one hex away — the "1 de radius" a potion reaches, per direct instruction. */
+  private validPotionTarget(actor: Unit, cell: Point): Unit | null {
+    const target = this.units.find((x) => x.alive && x.side === "player" && x.x === cell.x && x.y === cell.y);
+    if (!target) return null;
+    if (target.id === actor.id) return target;
+    return hexNeighbors(actor.x, actor.y).some((n) => n.x === cell.x && n.y === cell.y) ? target : null;
+  }
+
+  /** The tap that resolves an armed potion (see usePotion/handleCell's awaitPotion branch). */
+  private confirmPotionAt(actor: Unit, cell: Point): void {
+    const kind = this.potionAim;
+    if (!kind) return;
+    const target = this.validPotionTarget(actor, cell);
+    if (!target) {
+      this.tip = "Alvo inválido — só você ou um aliado adjacente.";
+      sfxPlay.ui();
+      return;
+    }
+    this.mode = "awaitAction";
+    this.potionAim = null;
+    this.applyPotion(actor, target, kind);
+  }
+
+  /** The potion's actual effect on `target`, spent from `actor`'s bag and ending their turn
+   * — actor and target are the same unit for a self-drink, or actor hands it to an adjacent
+   * ally (see confirmPotionAt/validPotionTarget). */
+  private applyPotion(actor: Unit, target: Unit, kind: PotionId): void {
     const def = POTIONS[kind];
     if (def.effect === "disease") {
-      if (!u.diseased && !u.poisoned) {
-        this.tip = `${def.name} · ${u.name} não está doente.`;
+      if (!target.diseased && !target.poisoned) {
+        this.tip = `${def.name} · ${target.name} não está doente.`;
         sfxPlay.ui();
         return;
       }
-      u.bag[kind] -= 1;
-      this.curePlayerDisease(u);
-      u.x = Math.round(u.drawX);
-      u.y = Math.round(u.drawY);
-      this.tip = `${def.name} · doença curada.`;
-      this.finishAction(u);
+      actor.bag[kind] -= 1;
+      this.curePlayerDisease(target);
+      actor.x = Math.round(actor.drawX);
+      actor.y = Math.round(actor.drawY);
+      this.tip = `${def.name} · ${target.name} curado(a) da doença.`;
+      this.emitBeneficialGlow(target);
+      this.finishAction(actor);
       sfxPlay.ui();
       return;
     }
@@ -3350,23 +3530,23 @@ export class BattleEngine {
       let restored = 0;
       for (let t = 1; t <= 10; t++) {
         const tk = tierKey(t as SpellTier);
-        const cap = tierUses(u.classId, t as SpellTier, u.level);
+        const cap = tierUses(target.classId, t as SpellTier, target.level);
         if (cap <= 0) continue;
-        const next = Math.min(cap, u.spells[tk] + restore);
-        restored += next - u.spells[tk];
-        u.spells[tk] = next;
+        const next = Math.min(cap, target.spells[tk] + restore);
+        restored += next - target.spells[tk];
+        target.spells[tk] = next;
       }
       if (restored <= 0) {
-        this.tip = `${def.name} · magias já estão no máximo.`;
+        this.tip = `${def.name} · magias de ${target.name} já estão no máximo.`;
         sfxPlay.ui();
         return;
       }
-      u.bag[kind] -= 1;
-      u.x = Math.round(u.drawX);
-      u.y = Math.round(u.drawY);
+      actor.bag[kind] -= 1;
+      actor.x = Math.round(actor.drawX);
+      actor.y = Math.round(actor.drawY);
       this.emitParticle({
-        x: u.drawX,
-        y: u.drawY - 0.35,
+        x: target.drawX,
+        y: target.drawY - 0.35,
         vx: 0,
         vy: -0.18,
         life: 0,
@@ -3377,22 +3557,27 @@ export class BattleEngine {
         kind: "text",
         frame: 0,
       });
-      this.tip = `${def.name} · +${restored} usos de magia`;
-      this.finishAction(u);
+      this.tip = `${def.name} · +${restored} usos de magia (${target.name})`;
+      this.emitBeneficialGlow(target);
+      this.finishAction(actor);
       sfxPlay.ui();
       return;
     }
-    if (u.hp >= u.maxHp) return;
+    if (target.hp >= target.maxHp) {
+      this.tip = `${target.name} já está com HP cheio.`;
+      sfxPlay.ui();
+      return;
+    }
     const heal = rollPotion(kind, this.rng);
-    const gained = Math.min(heal, u.maxHp - u.hp);
-    u.hp += gained;
-    this.gainExp(u, u.level, gained);
-    u.bag[kind] -= 1;
-    u.x = Math.round(u.drawX);
-    u.y = Math.round(u.drawY);
+    const gained = Math.min(heal, target.maxHp - target.hp);
+    target.hp += gained;
+    this.gainExp(actor, target.level, gained);
+    actor.bag[kind] -= 1;
+    actor.x = Math.round(actor.drawX);
+    actor.y = Math.round(actor.drawY);
     this.emitParticle({
-      x: u.drawX,
-      y: u.drawY - 0.35,
+      x: target.drawX,
+      y: target.drawY - 0.35,
       vx: 0,
       vy: -0.18,
       life: 0,
@@ -3403,8 +3588,9 @@ export class BattleEngine {
       kind: "text",
       frame: 0,
     });
-    this.tip = `${potionLabel(kind)} · +${gained} HP`;
-    this.finishAction(u);
+    this.tip = `${potionLabel(kind)} · +${gained} HP (${target.name})`;
+    this.emitBeneficialGlow(target);
+    this.finishAction(actor);
     sfxPlay.ui();
   }
 
@@ -4033,6 +4219,12 @@ export class BattleEngine {
     const occ = occupancy(this.units);
     const here = occ.get(key(cell.x, cell.y));
     const selected = this.units.find((u) => u.id === this.selectedId);
+
+    if (this.mode === "awaitPotion" && selected) {
+      this.hover = cell;
+      this.confirmPotionAt(selected, cell);
+      return;
+    }
 
     if (this.mode === "awaitSpell" && selected) {
       this.hover = cell;
@@ -4780,6 +4972,18 @@ export class BattleEngine {
 
     if (this.mode === "idle" && this.threat.length) overlay(this.threat, "rgba(220,120,90,0.5)");
 
+    if (this.mode === "awaitPotion") {
+      const selected = this.units.find((u) => u.id === this.selectedId);
+      if (selected) {
+        const range = [{ x: selected.x, y: selected.y }, ...hexNeighbors(selected.x, selected.y)].filter((c) =>
+          this.validPotionTarget(selected, c),
+        );
+        overlay(range, "rgba(150,210,170,0.45)");
+        const cell = this.hover;
+        if (cell && this.validPotionTarget(selected, cell)) overlay([cell], "rgba(170,230,180,0.55)");
+      }
+    }
+
     if (this.mode === "awaitSpell") {
       const selected = this.units.find((u) => u.id === this.selectedId);
       if (selected && this.spellKind === "fireball") {
@@ -5014,6 +5218,21 @@ export class BattleEngine {
         ctx.shadowColor = `rgba(255,208,110,${0.95 * u.levelGlow})`;
         ctx.shadowBlur = w * 0.4 * u.levelGlow * pulse;
       }
+      // A gentler, cooler-white "divine light" halo for a heal spell landing or a potion
+      // being drunk — same technique as levelGlow, its own softer palette and pace so the
+      // two read as different events even if they happen to overlap.
+      if (u.healGlow > 0) {
+        const pulse = 0.8 + Math.sin(this.time * 5) * 0.2;
+        const bg = ctx.createRadialGradient(0, -h * 0.5, 0, 0, -h * 0.5, w * 1.05);
+        bg.addColorStop(0, `rgba(255,248,224,${0.42 * u.healGlow * pulse})`);
+        bg.addColorStop(1, "rgba(255,248,224,0)");
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.arc(0, -h * 0.5, w * 1.05, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowColor = `rgba(255,250,235,${0.85 * u.healGlow})`;
+        ctx.shadowBlur = w * 0.32 * u.healGlow * pulse;
+      }
       if (u.flash > 0) ctx.filter = `brightness(${1.8 + u.flash})`;
       if (img) ctx.drawImage(img, -w / 2, -h, w, h);
       else {
@@ -5026,6 +5245,12 @@ export class BattleEngine {
       if (u.levelGlow > 0 && img) {
         const pulse = 0.75 + Math.sin(this.time * 7) * 0.25;
         ctx.shadowBlur = w * 0.55 * u.levelGlow * pulse;
+        ctx.drawImage(img, -w / 2, -h, w, h);
+      }
+      if (u.healGlow > 0 && img) {
+        const pulse = 0.8 + Math.sin(this.time * 5) * 0.2;
+        ctx.shadowColor = `rgba(255,250,235,${0.85 * u.healGlow})`;
+        ctx.shadowBlur = w * 0.42 * u.healGlow * pulse;
         ctx.drawImage(img, -w / 2, -h, w, h);
       }
       ctx.filter = "none";
@@ -5205,29 +5430,141 @@ export class BattleEngine {
           const wave = Math.sin(k * Math.PI * 2.4 + m.seed) * tile * 0.16 * (1 - k * 0.6);
           return { x: from.cx + dxT * k + nx * wave, y: from.cy - tile * 0.3 + dyT * k + ny * wave };
         };
-        const k = Math.min(1, m.t / m.max);
-        // A short comet trail: a handful of ghost positions just behind the head, fading and
-        // shrinking with distance from it.
-        for (let i = 5; i >= 0; i--) {
-          const tk = Math.max(0, k - i * 0.045);
-          const p = along(tk);
-          const fade = (1 - i / 6) * Math.max(0, 1 - k * 0.15);
-          const r = tile * (0.1 - i * 0.012);
-          if (r <= 0) continue;
-          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 2.4);
-          g.addColorStop(0, `hsla(${m.hue}, 95%, 82%, ${fade})`);
-          g.addColorStop(0.4, `hsla(${m.hue}, 90%, 62%, ${fade * 0.7})`);
-          g.addColorStop(1, `hsla(${m.hue}, 90%, 55%, 0)`);
-          ctx.fillStyle = g;
+        // kHead: the bolt's own position, 0-1, frozen at 1 once it lands. afterglow: 0 while
+        // still flying, ramping to 1 as the lingering trail fades out after arrival.
+        const kHead = Math.min(1, m.t / MISSILE_TRAVEL);
+        const afterglow = Math.max(0, (m.t - MISSILE_TRAVEL) / MISSILE_AFTERGLOW);
+
+        // The light trace it leaves behind: a single stroke along the whole path already
+        // flown, distinct from the comet below (which only ever hugs the head) — this is
+        // what stays visible on the ground after the bolt has passed through.
+        if (kHead > 0.02) {
+          const steps = 16;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, r * 2.4, 0, Math.PI * 2);
+          for (let i = 0; i <= steps; i++) {
+            const p = along((i / steps) * kHead);
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+          }
+          const traceFade = (1 - afterglow) * 0.55;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.lineWidth = tile * 0.05;
+          ctx.strokeStyle = `hsla(${m.hue}, 90%, 74%, ${traceFade})`;
+          ctx.shadowColor = `hsla(${m.hue}, 95%, 70%, ${traceFade})`;
+          ctx.shadowBlur = tile * 0.4;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        }
+
+        if (afterglow < 1) {
+          // A bigger, punchier comet trail right behind the head.
+          for (let i = 7; i >= 0; i--) {
+            const tk = Math.max(0, kHead - i * 0.05);
+            const p = along(tk);
+            const fade = (1 - i / 8) * (1 - afterglow);
+            const r = tile * (0.16 - i * 0.016);
+            if (r <= 0) continue;
+            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3);
+            g.addColorStop(0, `hsla(${m.hue}, 95%, 86%, ${fade})`);
+            g.addColorStop(0.35, `hsla(${m.hue}, 92%, 68%, ${fade * 0.75})`);
+            g.addColorStop(1, `hsla(${m.hue}, 90%, 55%, 0)`);
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r * 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          const head = along(kHead);
+          // A big soft aura around the head, well beyond the core, for real glow.
+          const auraFade = 1 - afterglow;
+          const aura = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, tile * 0.55);
+          aura.addColorStop(0, `hsla(${m.hue}, 100%, 85%, ${0.55 * auraFade})`);
+          aura.addColorStop(1, `hsla(${m.hue}, 100%, 60%, 0)`);
+          ctx.fillStyle = aura;
+          ctx.beginPath();
+          ctx.arc(head.x, head.y, tile * 0.55, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(255,255,255,${0.95 * auraFade})`;
+          ctx.beginPath();
+          ctx.arc(head.x, head.y, tile * 0.085, 0, Math.PI * 2);
           ctx.fill();
         }
-        const head = along(k);
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.beginPath();
-        ctx.arc(head.x, head.y, tile * 0.05, 0, Math.PI * 2);
-        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.lightningFxLive) {
+      for (const l of this.lightningFx) {
+        if (!l.live) continue;
+        const { cx, cy } = this.hexCenter(l.x, l.y);
+        const topY = cy - tile * LIGHTNING_FALL_HEIGHT;
+        const k = l.t / l.max;
+        // The strike itself is near-instant (a real bolt doesn't travel visibly slowly), then
+        // holds bright for a beat before fading — distinct from a projectile's smooth flight.
+        const reveal = Math.min(1, l.t / 0.06);
+        const fade = k < 0.35 ? 1 : Math.max(0, 1 - (k - 0.35) / 0.65);
+        if (fade <= 0) continue;
+
+        const n = l.segs.length;
+        const mainPts: { x: number; y: number }[] = [{ x: cx, y: topY }];
+        for (let i = 1; i <= n; i++) {
+          const f = i / (n + 1);
+          if (f > reveal) break;
+          mainPts.push({ x: cx + l.segs[i - 1]! * tile, y: topY + (cy - topY) * f });
+        }
+        if (reveal >= (n + 1 - 0.001) / (n + 1)) mainPts.push({ x: cx, y: cy });
+        if (mainPts.length < 2) continue;
+
+        const strokeBolt = (pts: { x: number; y: number }[], glowWidth: number, coreWidth: number) => {
+          ctx.beginPath();
+          pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+          ctx.lineJoin = "round";
+          ctx.lineCap = "round";
+          ctx.strokeStyle = `hsla(${l.hue}, 100%, 70%, ${0.55 * fade})`;
+          ctx.lineWidth = glowWidth;
+          ctx.shadowColor = `hsla(${l.hue}, 100%, 75%, ${0.9 * fade})`;
+          ctx.shadowBlur = tile * 0.5;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          // A bright white core on top of the colored glow, so the bolt reads as firm and
+          // solid rather than a soft haze.
+          ctx.strokeStyle = `rgba(255,255,255,${0.95 * fade})`;
+          ctx.lineWidth = coreWidth;
+          ctx.stroke();
+        };
+
+        strokeBolt(mainPts, tile * 0.24, tile * 0.08);
+
+        for (const b of l.branches) {
+          const startIdx = Math.min(mainPts.length - 1, Math.round(b.at * (n + 1)));
+          if (startIdx < 1) continue;
+          const start = mainPts[startIdx]!;
+          const forkReveal = Math.max(0, Math.min(1, (reveal - b.at) / (1 - b.at + 0.001)));
+          const segCount = b.segs.length;
+          const shown = Math.round(forkReveal * segCount);
+          if (shown < 1) continue;
+          const branchPts = [start];
+          for (let i = 0; i < shown; i++) {
+            const f = (i + 1) / segCount;
+            branchPts.push({
+              x: start.x + b.side * tile * 0.5 * f + b.segs[i]! * tile,
+              y: start.y + (cy - topY) * (1 - b.at) * f * 0.7,
+            });
+          }
+          if (branchPts.length >= 2) strokeBolt(branchPts, tile * 0.13, tile * 0.045);
+        }
+
+        // A bright flash at the strike point, biggest right on impact.
+        if (k < 0.5) {
+          const flashFade = Math.max(0, 1 - k / 0.5);
+          const flash = ctx.createRadialGradient(cx, cy, 0, cx, cy, tile * 0.9);
+          flash.addColorStop(0, `hsla(${l.hue}, 100%, 88%, ${0.7 * flashFade})`);
+          flash.addColorStop(1, `hsla(${l.hue}, 100%, 70%, 0)`);
+          ctx.fillStyle = flash;
+          ctx.beginPath();
+          ctx.arc(cx, cy, tile * 0.9, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.globalAlpha = 1;
     }

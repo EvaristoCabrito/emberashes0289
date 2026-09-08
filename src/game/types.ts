@@ -104,7 +104,7 @@ export type SpellKind =
   | "stampede";
 export type ScreenId = "boot" | "title" | "campaign" | "worldMap" | "briefing" | "cutscene" | "epilogue" | "battle" | "victory" | "defeat" | "inn" | "testMenu" | "mapEditor";
 export type Phase = "player" | "enemy";
-export type InputMode = "idle" | "selected" | "awaitAction" | "awaitAttack" | "awaitOffHand" | "awaitSpell" | "locked";
+export type InputMode = "idle" | "selected" | "awaitAction" | "awaitAttack" | "awaitOffHand" | "awaitSpell" | "awaitPotion" | "locked";
 
 export interface Point {
   x: number;
@@ -293,6 +293,10 @@ export interface Unit {
   /** 1 right when a unit levels up, decaying to 0 over a couple seconds — drives the golden
    * glow drawn around the sprite in render() (see levelUpUnit/spawnLevelUp). */
   levelGlow: number;
+  /** Same idea as levelGlow but for receiving a beneficial effect — a heal spell landing or
+   * a potion being drunk — drawn as a softer, warm-white "divine light" halo (see
+   * emitBeneficialGlow). Decays independently of levelGlow so the two can overlap. */
+  healGlow: number;
   fade: number;
   bob: number;
   level: number;

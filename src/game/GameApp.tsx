@@ -4194,7 +4194,12 @@ function BattleScreen({
           <Button size="sm" variant="quiet" disabled={!showAct || hud.busy} onClick={() => engine.wait()}>
             Esperar
           </Button>
-          <Button size="sm" variant="ghost" disabled={!showAct || hud.busy} onClick={() => engine.cancel()}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={(!showAct && hud.mode !== "awaitPotion") || hud.busy}
+            onClick={() => engine.cancel()}
+          >
             Cancelar
           </Button>
           {actor && (
