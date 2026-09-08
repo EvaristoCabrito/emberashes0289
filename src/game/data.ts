@@ -1928,6 +1928,18 @@ export function brigandSpellUses(level: number): { longShot: number; piercing: n
   };
 }
 
+/** Birolho — the one enemy that opens with both a bolt AND an AoE: 1 Caustic Venom, 3 Magic
+ * Missile at spawn; level 5 bumps to 2 Venom, 4 Magic Missile; Lightning joins at level 10,
+ * one cast. Per-spell counts, not a tier ladder like cultist/brigand's, since Venom sits on
+ * tier4 while Magic Missile/Lightning share tier1/tier2 — see runAiFor's birolho branch. */
+export function birolhoSpellUses(level: number): { magicMissile: number; causticVenom: number; lightning: number } {
+  return {
+    magicMissile: level >= 5 ? 4 : 3,
+    causticVenom: level >= 5 ? 2 : 1,
+    lightning: level >= 10 ? 1 : 0,
+  };
+}
+
 /** Conjurer tier 1: summons a controllable ally at half the conjurer's current stats
  * (recomputed from the conjurer at cast time, so a later-battle or higher-level cast comes
  * in stronger) anywhere within range, passable and unoccupied. Stays until the battle ends —

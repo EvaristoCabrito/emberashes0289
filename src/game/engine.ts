@@ -1,4 +1,4 @@
-import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower, cultistSpellUses, brigandSpellUses } from "./data";
+import { CAUSTIC_VENOM, CHEST_LOOT, CLASSES, CLEAVE, cleaveFormula, cleavePower, CURE_DISEASE, CURES, DECORATIONS, DISEASE, DOUBLE_STRIKE, doubleStrikeFormula, doubleStrikePower, EMPTY_BAG, EQUIPMENT, EXP_TO_LEVEL, expForHit, FIREBALL, FOOTPRINT_TYPE_7, FOOTPRINT_TYPE_8, KILL_DROP_CHANCE, LIGHTNING, LONG_SHOT, longShotFormula, longShotPower, MAGIC_MISSILE, magicMissileCount, MAX_LEVEL, PIERCING, piercingMul, PIERCING_THRUST, POTION_CARRY_MAX, POTIONS, SUMMON_FAMILIAR, SWEEP, TRIP, WEAPON_MAX_ENH, WEAPONS, WEB_OF_DREAMS, healFormula, barricadeDecor, decorationCells, decorationFacing, decorationImage, diceFormula, effectiveMaxRange, enemyLevelFor, fireballFormula, fireballOrigin, fireballPower, fireballRangeTiles, fireballTiles, hexAreaTiles, isProjectile, isSummonClass, lightningDice, lightningFormula, missionGearLevel, parseLayout, placedFootprint, potionLabel, rollCure, rollDice, rollPotion, spellFormula, spellTier, starterWeaponFor, STARTING_BAG, statsFor, terrainNote, TERRAIN, tierKey, tierUses, gearStatBonus, offHandBlocked, weaponRoll, weightedLootPick, weightedPotionPick, weightedWeaponPick, MULTI_SHOT, multiShotFormula, multiShotPower, multiShotTargets, SECOND_WIND, secondWindPct, auraPower, AURA_OF_PROTECTION, INTIMIDATING_PRESENCE, DIVINE_WRATH, divineWrathFormula, divineWrathPower, SHOULDER_SMASH, shoulderSmashFormula, shoulderSmashPower, STAMPEDE, stampedeFormula, stampedePower, cultistSpellUses, brigandSpellUses, birolhoSpellUses } from "./data";
 import type { SpellTier } from "./data";
 import { canCounter, makeForecast, mulberry32, powerOf, protOf, rollDamage, rollDamageCustom } from "./combat";
 import {
@@ -346,22 +346,30 @@ function spawnUnit(spawn: Mission["playerSpawns"][number], side: Unit["side"], i
     xp: side === "player" ? (roster?.xp?.[spawn.name] ?? 0) : 0,
     bag: side === "player" ? { ...(roster?.bags?.[spawn.name] ?? (cls.id === "healer" ? EMPTY_BAG : STARTING_BAG)) } : { ...EMPTY_BAG },
     spells: {
-      // Cultist is enemy-only, so this never competes with a player roster's own tier1/tier2
-      // uses — see cultistSpellUses/brigandSpellUses and runAiFor's cultist/brigand branches.
+      // Cultist and Birolho are enemy-only, so this never competes with a player roster's own
+      // tier1/tier2/tier4 uses — see cultistSpellUses/brigandSpellUses/birolhoSpellUses and
+      // runAiFor's cultist/brigand/birolho branches.
       tier1:
         cls.id === "cultist"
           ? cultistSpellUses(level).magicMissile
           : cls.id === "brigand"
             ? brigandSpellUses(level).longShot
-            : remainingTier(cls.id, 1, "tier1", level, side, roster, spawn.name),
+            : cls.id === "birolho"
+              ? birolhoSpellUses(level).magicMissile
+              : remainingTier(cls.id, 1, "tier1", level, side, roster, spawn.name),
       tier2:
         cls.id === "cultist"
           ? cultistSpellUses(level).lightning
           : cls.id === "brigand"
             ? brigandSpellUses(level).piercing
-            : remainingTier(cls.id, 2, "tier2", level, side, roster, spawn.name),
+            : cls.id === "birolho"
+              ? birolhoSpellUses(level).lightning
+              : remainingTier(cls.id, 2, "tier2", level, side, roster, spawn.name),
       tier3: remainingTier(cls.id, 3, "tier3", level, side, roster, spawn.name),
-      tier4: remainingTier(cls.id, 4, "tier4", level, side, roster, spawn.name),
+      tier4:
+        cls.id === "birolho"
+          ? birolhoSpellUses(level).causticVenom
+          : remainingTier(cls.id, 4, "tier4", level, side, roster, spawn.name),
       tier5: remainingTier(cls.id, 5, "tier5", level, side, roster, spawn.name),
       tier6: remainingTier(cls.id, 6, "tier6", level, side, roster, spawn.name),
       tier7: remainingTier(cls.id, 7, "tier7", level, side, roster, spawn.name),
@@ -3505,6 +3513,132 @@ export class BattleEngine {
         }
         this.queue.push({ type: "delay", dur: 0.12 });
         return;
+      }
+    }
+
+    // Birolho — see birolhoSpellUses. Lightning (once unlocked at level 10) outranks Caustic
+    // Venom, which outranks its base Magic Missile: same "spend the rarest charge first"
+    // priority as the cultist branch above, just three deep. Lightning and Magic Missile reuse
+    // that exact single-bolt targeting; Caustic Venom is its own AoE, so instead of scoring one
+    // foe it scores by how many players its splash (the same size/range as the player-facing
+    // spell) would land on, aimed at whichever foe's cell catches the most / lowest-hp targets.
+    if (next.classId === "birolho" && (next.spells.tier1 > 0 || next.spells.tier2 > 0 || next.spells.tier4 > 0)) {
+      if (next.spells.tier2 > 0) {
+        let bestBolt: { foe: Unit; from: Point; score: number } | null = null;
+        for (const cell of reach.values()) {
+          for (const foe of players) {
+            if (manhattan(cell, foe) > LIGHTNING.range) continue;
+            if (!clearShot(cell, { x: foe.x, y: foe.y }, this.tiles, this.cols, "bolt")) continue;
+            const score = (foe.maxHp - foe.hp) * 3 + (foe.hp <= 8 ? 20 : 0);
+            if (!bestBolt || score > bestBolt.score) bestBolt = { foe, from: { x: cell.x, y: cell.y }, score };
+          }
+        }
+        if (bestBolt) {
+          if (bestBolt.from.x !== next.x || bestBolt.from.y !== next.y) {
+            this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestBolt.from) });
+          }
+          this.spendTier(next, "lightning");
+          this.queue.push({
+            type: "spell",
+            att: next.id,
+            tiles: [{ x: bestBolt.foe.x, y: bestBolt.foe.y }],
+            ids: [bestBolt.foe.id],
+            dice: lightningDice(),
+            faces: LIGHTNING.faces,
+            bonus: LIGHTNING.bonus,
+            label: LIGHTNING.name,
+            echo: { dice: LIGHTNING.echoDice, faces: LIGHTNING.echoFaces, bonus: LIGHTNING.echoBonus },
+            spellMul: LIGHTNING.mul,
+            spellKind: "lightning",
+          });
+          this.queue.push({ type: "delay", dur: 0.12 });
+          return;
+        }
+      }
+      if (next.spells.tier4 > 0) {
+        let bestVenom: { at: Point; from: Point; score: number } | null = null;
+        for (const cell of reach.values()) {
+          for (const foe of players) {
+            if (manhattan(cell, foe) > CAUSTIC_VENOM.range) continue;
+            if (!clearShot(cell, { x: foe.x, y: foe.y }, this.tiles, this.cols, "bolt")) continue;
+            const splash = hexAreaTiles({ x: foe.x, y: foe.y }, CAUSTIC_VENOM.size, this.cols, this.rows);
+            let hits = 0;
+            let score = 0;
+            for (const t of splash) {
+              const hit = players.find((p) => p.x === t.x && p.y === t.y);
+              if (!hit) continue;
+              hits += 1;
+              score += (hit.maxHp - hit.hp) + (hit.hp <= 8 ? 15 : 0);
+            }
+            if (hits === 0) continue;
+            score += hits * 10;
+            if (!bestVenom || score > bestVenom.score) bestVenom = { at: { x: foe.x, y: foe.y }, from: { x: cell.x, y: cell.y }, score };
+          }
+        }
+        if (bestVenom) {
+          if (bestVenom.from.x !== next.x || bestVenom.from.y !== next.y) {
+            this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestVenom.from) });
+          }
+          this.spendTier(next, "causticVenom");
+          const tiles = hexAreaTiles(bestVenom.at, CAUSTIC_VENOM.size, this.cols, this.rows);
+          const ids: string[] = [];
+          for (const t of tiles) {
+            const u = this.units.find((x) => x.alive && occupies(x, t.x, t.y));
+            if (u && !ids.includes(u.id)) ids.push(u.id);
+          }
+          const center = this.units.find((x) => x.alive && occupies(x, bestVenom.at.x, bestVenom.at.y));
+          this.queue.push({
+            type: "spell",
+            att: next.id,
+            tiles,
+            ids,
+            dice: CAUSTIC_VENOM.splashDice,
+            faces: CAUSTIC_VENOM.splashFaces,
+            bonus: CAUSTIC_VENOM.splashBonus,
+            centerId: center?.id,
+            centerDice: CAUSTIC_VENOM.centerDice,
+            centerFaces: CAUSTIC_VENOM.centerFaces,
+            centerBonus: CAUSTIC_VENOM.centerBonus,
+            poison: true,
+            label: CAUSTIC_VENOM.name,
+            spellMul: CAUSTIC_VENOM.splashMul,
+            centerMul: CAUSTIC_VENOM.centerMul,
+            spellKind: "causticVenom",
+          });
+          this.queue.push({ type: "delay", dur: 0.12 });
+          return;
+        }
+      }
+      if (next.spells.tier1 > 0) {
+        let bestBolt: { foe: Unit; from: Point; score: number } | null = null;
+        for (const cell of reach.values()) {
+          for (const foe of players) {
+            if (manhattan(cell, foe) > MAGIC_MISSILE.range) continue;
+            if (!clearShot(cell, { x: foe.x, y: foe.y }, this.tiles, this.cols, "bolt")) continue;
+            const score = (foe.maxHp - foe.hp) * 3 + (foe.hp <= 8 ? 20 : 0);
+            if (!bestBolt || score > bestBolt.score) bestBolt = { foe, from: { x: cell.x, y: cell.y }, score };
+          }
+        }
+        if (bestBolt) {
+          if (bestBolt.from.x !== next.x || bestBolt.from.y !== next.y) {
+            this.queue.push({ type: "move", id: next.id, path: reconstructPath(reach, bestBolt.from) });
+          }
+          this.spendTier(next, "magicMissile");
+          this.queue.push({
+            type: "spell",
+            att: next.id,
+            tiles: [{ x: bestBolt.foe.x, y: bestBolt.foe.y }],
+            ids: [bestBolt.foe.id],
+            dice: MAGIC_MISSILE.dice,
+            faces: MAGIC_MISSILE.faces,
+            bonus: MAGIC_MISSILE.bonus,
+            label: MAGIC_MISSILE.name,
+            spellMul: MAGIC_MISSILE.mul,
+            spellKind: "magicMissile",
+          });
+          this.queue.push({ type: "delay", dur: 0.12 });
+          return;
+        }
       }
     }
 

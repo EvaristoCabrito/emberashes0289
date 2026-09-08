@@ -162,6 +162,18 @@ export async function loadGameArt(): Promise<GameArt> {
       back: await loadImage("/game/sprites/kael/walk-back.png"),
       side: await loadImage("/game/sprites/kael/walk-side.png"),
     },
+    // No side-on art for either — the idle/front frame stands in, same as it already does for
+    // any sprite with no walkDirs entry at all, so a purely sideways step doesn't visibly swap.
+    birolho: {
+      front: await loadImage("/game/sprites/birolho/1.png"),
+      back: await loadImage("/game/sprites/birolho/back.png"),
+      side: await loadImage("/game/sprites/birolho/1.png"),
+    },
+    butcher: {
+      front: await loadImage("/game/sprites/butcher/front.png"),
+      back: await loadImage("/game/sprites/butcher/back.png"),
+      side: await loadImage("/game/sprites/butcher/front.png"),
+    },
   };
   return { tiles, decorations, sprites, attacks, walks, idles, walkDirs, impact, backdrops };
 }
